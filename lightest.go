@@ -2,8 +2,33 @@ package main
 
 import (
 	"fmt"
+	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
+	"os"
+	"time"
 )
+
+func populate(cmd *cobra.Command, args []string) error {
+
+	fmt.Printf("Inside pop with args: %v\n", args)
+	cluster := gocql.NewCluster("localhost")
+	cluster.Timeout, _ = time.ParseDuration("30s")
+	session, err := cluster.CreateSession()
+	if err != nil {
+		return err
+	}
+	err = session.Query(CREATE_KS).Exec()
+	if err != nil {
+		return err
+	}
+	cluster.Keyspace = "yacht"
+	return nil
+}
+
+func transfer(cmd *cobra.Command, args []string) error {
+	fmt.Printf("Inside pay with args: %v\n", args)
+	return nil
+}
 
 func main() {
 	var rootCmd = &cobra.Command{
@@ -19,14 +44,20 @@ bandwidth along the way.`,
 	var popCmd = &cobra.Command{
 		Use: "pop",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Inside pop with args: %v\n", args)
+			if err := populate(cmd, args); err != nil {
+				fmt.Printf("%v\n", err)
+				os.Exit(-1)
+			}
 		},
 	}
 	var payCmd = &cobra.Command{
 		Use:   "pay",
 		Short: "run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Inside pay with args: %v\n", args)
+			if err := transfer(cmd, args); err != nil {
+				fmt.Printf("%v\n", err)
+				os.Exit(-1)
+			}
 		},
 	}
 	rootCmd.AddCommand(popCmd, payCmd)

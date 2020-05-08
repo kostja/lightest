@@ -1,3 +1,3 @@
 all:
 	go mod vendor
-	go build -mod vendor -o lightest lightest.go
+	go build -mod vendor -o lightest lightest.go cql.go
