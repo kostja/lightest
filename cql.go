@@ -1,7 +1,7 @@
 package main
 
 const CREATE_KS = `CREATE KEYSPACE IF NOT EXISTS lightest
-WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor' : 3 }
+WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor' : 1 }
 AND DURABLE_WRITES=true`
 
 const CREATE_ACCOUNTS_TAB = `
@@ -27,7 +27,7 @@ CREATE TABLE transfers (
 )`
 
 const INSERT_ACCOUNT = `
-INSERT INTO accounts (bic, ban, balance) VALUES (...) IF NOT EXISTS
+INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 `
 
 const INSERT_TRANSER = `
@@ -63,4 +63,8 @@ UPDATE accounts
   SET pending_transfer = null balance = ?
   WHERE bic = ? AND ban = ?
   IF pending_transfer = ?
+`
+
+const DROP_KS = `
+DROP KEYSPACE IF EXISTS lightest
 `

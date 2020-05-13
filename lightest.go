@@ -1,36 +1,17 @@
 package main
 
 import (
-	"fmt"
-	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
+	"log"
 	"os"
-	"time"
 )
 
-func populate(cmd *cobra.Command, args []string) error {
-
-	fmt.Printf("Inside pop with args: %v\n", args)
-	cluster := gocql.NewCluster("localhost")
-	cluster.Timeout, _ = time.ParseDuration("30s")
-	session, err := cluster.CreateSession()
-	if err != nil {
-		return err
-	}
-	err = session.Query(CREATE_KS).Exec()
-	if err != nil {
-		return err
-	}
-	cluster.Keyspace = "yacht"
-	return nil
-}
-
-func transfer(cmd *cobra.Command, args []string) error {
-	fmt.Printf("Inside pay with args: %v\n", args)
-	return nil
-}
+var llog *log.Logger
 
 func main() {
+
+	llog = log.New(os.Stdout, "", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+
 	var rootCmd = &cobra.Command{
 		Use:   "lightest [pop|pay]",
 		Short: "lightest - a sample LWT application implementing an account ledger",
@@ -45,8 +26,7 @@ bandwidth along the way.`,
 		Use: "pop",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := populate(cmd, args); err != nil {
-				fmt.Printf("%v\n", err)
-				os.Exit(-1)
+				llog.Fatalf("%v", err)
 			}
 		},
 	}
@@ -54,9 +34,8 @@ bandwidth along the way.`,
 		Use:   "pay",
 		Short: "run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := transfer(cmd, args); err != nil {
-				fmt.Printf("%v\n", err)
-				os.Exit(-1)
+			if err := pay(cmd, args); err != nil {
+				llog.Fatalf("%v", err)
 			}
 		},
 	}
