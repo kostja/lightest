@@ -1,0 +1,13 @@
+- implement pay
+  * retrieve old balances
+  * arithmetics
+  * add handling for non-existing rows
+  * add handling for pending_transfer != transfer_id 
+  * add handling of insufficient funds
+  * add handlign for client  mistmatch
+  * add statistics
+- implement check()
+- add retrieval of a subset existing bic/bans, not random bic/bans
+- make the number of workers as well as the number of rows/transfers configurable
+- implement recover 
+- add latency calculation min/max/99
