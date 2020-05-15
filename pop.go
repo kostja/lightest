@@ -26,7 +26,6 @@ func populate(cmd *cobra.Command, n int) error {
 		Password: "cassandra",
 	}
 	cluster.Timeout, _ = time.ParseDuration("30s")
-	cluster.Keyspace = "lightest"
 	cluster.Consistency = gocql.One
 
 	llog.Printf("Establishing connection to the cluster")
@@ -39,6 +38,11 @@ func populate(cmd *cobra.Command, n int) error {
 		return err
 	}
 	if err = session.Query(CREATE_KS).Exec(); err != nil {
+		return err
+	}
+	cluster.Keyspace = "lightest"
+	session, err = cluster.CreateSession()
+	if err != nil {
 		return err
 	}
 	if err = session.Query(CREATE_ACCOUNTS_TAB).Exec(); err != nil {

@@ -29,7 +29,7 @@ bandwidth along the way.`,
 		Example: "./lightest populate -n 100000000",
 
 		Run: func(cmd *cobra.Command, args []string) {
-			var n, _ = cmd.Flags().GetInt("n")
+			var n, _ = cmd.Flags().GetInt("number")
 			if err := populate(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
