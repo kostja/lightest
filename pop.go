@@ -54,7 +54,7 @@ func populate(cmd *cobra.Command, n int) error {
 	}
 	llog.Printf("Creating a worker pool")
 
-	worker := func(id int, wg *sync.WaitGroup) {
+	worker := func(id int, n_accounts int, wg *sync.WaitGroup) {
 
 		defer wg.Done()
 
@@ -63,8 +63,8 @@ func populate(cmd *cobra.Command, n int) error {
 		rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
-		llog.Printf("Inserting accounts")
-		for i := 0; i < n/workers; i++ {
+		llog.Printf("Inserting %d accounts", n_accounts)
+		for i := 0; i < n_accounts; i++ {
 			bic := gocql.TimeUUID().String()
 			ban := gocql.TimeUUID().String()
 			balance := inf.NewDec(rand.Int63n(100000), 0)
@@ -78,9 +78,16 @@ func populate(cmd *cobra.Command, n int) error {
 	}
 	var wg sync.WaitGroup
 
-	for i := 0; i < 10; i++ {
+	accounts_per_worker := n / workers
+	remainder := n - accounts_per_worker*workers
+
+	for i := 0; i < workers; i++ {
+		n_accounts := accounts_per_worker
+		if i < remainder {
+			n_accounts++
+		}
 		wg.Add(1)
-		go worker(i+1, &wg)
+		go worker(i+1, n_accounts, &wg)
 	}
 
 	wg.Wait()

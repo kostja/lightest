@@ -69,28 +69,57 @@ func (t *Transfer) Make(
 		return merry.New(fmt.Sprintf("Failed to update transfer %v",
 			transfer_id))
 	}
-	// Lock source account
-	t.check_src_account.Bind(transfer_id, src_bic, src_ban, amount)
-	if applied, err = t.check_src_account.MapScanCAS(row); err != nil {
-		return merry.Wrap(err)
+
+	applied = false
+	sleepDuration, _ := time.ParseDuration("0.1s")
+	maxSleepDuration, _ := time.ParseDuration("10s")
+	for applied == false {
+
+		newSleepDuration := sleepDuration * 2
+		if newSleepDuration > maxSleepDuration {
+			newSleepDuration = maxSleepDuration
+		}
+
+		// Lock source account
+		t.check_src_account.Bind(transfer_id, src_bic, src_ban, amount)
+		if applied, err = t.check_src_account.MapScanCAS(row); err != nil {
+			return merry.Wrap(err)
+		}
+		llog.Printf("%v", row)
+		if applied != true {
+			if len(row) == 0 {
+				atomic.AddUint64(&stats.no_such_account, 1)
+				return nil
+			}
+			// pending_transfer != null
+			//	 check pending transfer state:
+			//     if the client is there, sleep & restart
+			//     else complete  the existing transfer
+			// insufficient balance
+			time.Sleep(sleepDuration)
+			sleepDuration = newSleepDuration
+			continue
+		}
+		// Lock destination account
+		t.check_dst_account.Bind(transfer_id, dst_bic, dst_ban)
+		if applied, err = t.check_dst_account.MapScanCAS(row); err != nil {
+			return merry.Wrap(err)
+		}
+		llog.Printf("%v", row)
+		if applied != true {
+			if len(row) == 0 {
+				atomic.AddUint64(&stats.no_such_account, 1)
+				return nil
+			}
+			// check pending transfer state:
+			//   if the client is there, sleep & restart
+			//   else complete  the existing transfer
+			time.Sleep(sleepDuration)
+			sleepDuration = newSleepDuration
+			continue
+		}
 	}
-	if applied != true {
-		// pending_transfer != null
-		//	 check pending transfer state:
-		//     if the client is there, sleep & restart
-		//     else complete  the existing transfer
-		// insufficient balance
-	}
-	// Lock destination account
-	t.check_dst_account.Bind(transfer_id, dst_bic, dst_ban)
-	if applied, err = t.check_dst_account.MapScanCAS(row); err != nil {
-		return merry.Wrap(err)
-	}
-	if applied != true {
-		// check pending transfer state:
-		//   if the client is there, sleep & restart
-		//   else complete  the existing transfer
-	}
+
 	return t.CompleteLockedTransfer(client_id, transfer_id, src_bic, src_ban,
 		dst_bic, dst_ban, amount)
 }
@@ -155,7 +184,7 @@ func pay(cmd *cobra.Command, n int) error {
 	}
 	var stats PayStats
 
-	worker := func(client_id gocql.UUID, wg *sync.WaitGroup) {
+	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 
 		defer wg.Done()
 
@@ -164,7 +193,7 @@ func pay(cmd *cobra.Command, n int) error {
 		var transfer Transfer
 		transfer.New(session)
 
-		for i := 0; i < n/workers; i++ {
+		for i := 0; i < n_transfers; i++ {
 
 			amount := inf.NewDec(rand.Int63n(1000), inf.Scale(rand.Int63n(100)))
 			src_bic := gocql.TimeUUID().String()
@@ -182,10 +211,16 @@ func pay(cmd *cobra.Command, n int) error {
 
 	}
 	var wg sync.WaitGroup
+	transfers_per_worker := n / workers
+	remainder := n - transfers_per_worker*workers
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		go worker(gocql.TimeUUID(), &wg)
+		n_transfers := transfers_per_worker
+		if i < remainder {
+			n_transfers++
+		}
+		go worker(gocql.TimeUUID(), n_transfers, &wg)
 	}
 
 	wg.Wait()
