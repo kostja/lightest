@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
@@ -31,25 +32,25 @@ func populate(cmd *cobra.Command, n int) error {
 	llog.Printf("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	llog.Printf("Creating the keyspace and tables")
 	if err = session.Query(DROP_KS).Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	if err = session.Query(CREATE_KS).Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	cluster.Keyspace = "lightest"
 	session, err = cluster.CreateSession()
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	if err = session.Query(CREATE_ACCOUNTS_TAB).Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	if err = session.Query(CREATE_TRANSFERS_TAB).Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	llog.Printf("Creating a worker pool")
 
@@ -69,7 +70,7 @@ func populate(cmd *cobra.Command, n int) error {
 			balance := inf.NewDec(rand.Int63n(100000), 0)
 			stmt.Bind(bic, ban, balance)
 			if err = stmt.Exec(); err != nil {
-				llog.Fatalf("%v", err)
+				llog.Fatalf("%+v", err)
 			}
 		}
 

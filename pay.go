@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
@@ -37,45 +38,45 @@ func (t *Transfer) Make(client_id gocql.UUID, src_bic string, src_ban string,
 	transfer_id := gocql.TimeUUID().String()
 	t.insert.Bind(transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount)
 	if err := t.insert.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	// Change transfer state
 	t.update.Bind(client_id, "pending", transfer_id, nil)
 	if err := t.update.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	// Lock source account
 	t.check_src_account.Bind(src_bic, src_ban, transfer_id)
 	if err := t.check_src_account.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	// Lock destination account
 	t.check_dst_account.Bind(dst_bic, dst_ban, transfer_id)
 	if err := t.check_dst_account.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	// Move transfer to 'in progress', to not attempt to transfer the money
 	// twice
 	t.update.Bind(client_id, "in progress", transfer_id, client_id)
 	if err := t.update.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	//
 	new_src_balance := amount
 	t.update_balance.Bind(src_bic, src_ban, new_src_balance, transfer_id)
 	if err := t.update_balance.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	new_dst_balance := amount
 	t.update_balance.Bind(dst_bic, dst_ban, new_dst_balance, transfer_id)
 	if err := t.update_balance.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 
 	// Move transfer to "complete"
 	t.update.Bind(nil, "complete", transfer_id, client_id)
 	if err := t.update.Exec(); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	return nil
 }
@@ -95,7 +96,7 @@ func pay(cmd *cobra.Command, args []string) error {
 	llog.Printf("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 
 	worker := func(client_id gocql.UUID, wg *sync.WaitGroup) {
@@ -117,6 +118,7 @@ func pay(cmd *cobra.Command, args []string) error {
 
 			err := transfer.Make(client_id, src_bic, src_ban, dst_bic, dst_ban, *amount)
 			if err != nil {
+				llog.Printf("%+v", err)
 				return
 			}
 		}
