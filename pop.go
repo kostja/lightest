@@ -6,13 +6,20 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 )
 
-func populate(cmd *cobra.Command, args []string) error {
+func populate(cmd *cobra.Command, n int) error {
 
-	fmt.Printf("Inside pop with args: %v\n", args)
+	var cores = runtime.NumCPU()
+	var workers = 4 * cores
+	if workers > n {
+		workers = n
+	}
+	fmt.Printf("Creating %d accounts using %d workers on %d cores \n", n, workers, cores)
+
 	cluster := gocql.NewCluster("localhost")
 	cluster.Authenticator = gocql.PasswordAuthenticator{
 		Username: "cassandra",
@@ -52,7 +59,7 @@ func populate(cmd *cobra.Command, args []string) error {
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
 		llog.Printf("Inserting accounts")
-		for i := 0; i < 10000; i++ {
+		for i := 0; i < n/workers; i++ {
 			bic := gocql.TimeUUID().String()
 			ban := gocql.TimeUUID().String()
 			balance := inf.NewDec(rand.Int63n(100000), 0)

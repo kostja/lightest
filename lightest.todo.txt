@@ -1,9 +1,12 @@
 - implement pay
+  * add handling for non-existing rows
+  * add handling of insufficient funds
+  * decimal arithmetics
+
+  * debug straightforward pay pay
   * retrieve old balances
   * arithmetics
-  * add handling for non-existing rows
   * add handling for pending_transfer != transfer_id 
-  * add handling of insufficient funds
   * add handlign for client  mistmatch
   * add statistics
 - implement check()

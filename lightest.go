@@ -23,16 +23,24 @@ bandwidth along the way.`,
 		Version: "0.9",
 	}
 	var popCmd = &cobra.Command{
-		Use: "pop",
+		Use:     "pop",
+		Aliases: []string{"populate"},
+		Short:   "Create and populate the accounts database",
+		Example: "./lightest populate -n 100000000",
+
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := populate(cmd, args); err != nil {
+			var n, _ = cmd.Flags().GetInt("n")
+			if err := populate(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
 		},
 	}
+	popCmd.PersistentFlags().IntP("number", "n", 100, "Number of accounts to create")
+
 	var payCmd = &cobra.Command{
-		Use:   "pay",
-		Short: "run the payments workload",
+		Use:     "pay",
+		Aliases: []string{"transfer"},
+		Short:   "Run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := pay(cmd, args); err != nil {
 				llog.Fatalf("%v", err)

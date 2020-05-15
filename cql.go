@@ -30,7 +30,7 @@ const INSERT_ACCOUNT = `
 INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 `
 
-const INSERT_TRANSER = `
+const INSERT_TRANSFER = `
 INSERT INTO transfers
   (id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
   VALUES (?, ?, ?, ?, ?, ?, ‘pending’)
@@ -58,7 +58,7 @@ UPDATE accounts
   IF pending_transfer = null
 `
 
-const UPDATE_ACCOUNT_SET_BALANCE = `
+const UPDATE_BALANCE = `
 UPDATE accounts
   SET pending_transfer = null balance = ?
   WHERE bic = ? AND ban = ?
