@@ -1,15 +1,16 @@
-- implement pay
+- implement pay()
   * add handling for non-existing rows
+  * use shorter identifiers for src_bic, src_ban, client id,
   * add handling of insufficient funds
   * decimal arithmetics
   * fetch old balances
-
-  * debug straightforward pay pay
-  * add handling for pending_transfer != transfer_id 
+  * add handling for pending_transfer != transfer_id
   * add handlign for client  mistmatch
-  * add statistics
+  * measure latency
+  * add retrieval of a subset existing bic/bans, not random bic/bans
+  * implement recover
+  done * debug straightforward pay
+- implement pop()
 - implement check()
-- add retrieval of a subset existing bic/bans, not random bic/bans
-- make the number of workers as well as the number of rows/transfers configurable
-- implement recover 
 - add latency calculation min/max/99
+- make the number of workers configurable
