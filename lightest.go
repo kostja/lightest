@@ -29,24 +29,26 @@ bandwidth along the way.`,
 		Example: "./lightest populate -n 100000000",
 
 		Run: func(cmd *cobra.Command, args []string) {
-			var n, _ = cmd.Flags().GetInt("number")
+			var n, _ = cmd.Flags().GetInt("accounts")
 			if err := populate(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
 		},
 	}
-	popCmd.PersistentFlags().IntP("number", "n", 100, "Number of accounts to create")
+	popCmd.PersistentFlags().IntP("accounts", "n", 100, "Number of accounts to create")
 
 	var payCmd = &cobra.Command{
 		Use:     "pay",
 		Aliases: []string{"transfer"},
 		Short:   "Run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := pay(cmd, args); err != nil {
+			var n, _ = cmd.Flags().GetInt("transfers")
+			if err := pay(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
 		},
 	}
+	payCmd.PersistentFlags().IntP("transfers", "n", 100, "Number of transfers to make")
 	rootCmd.AddCommand(popCmd, payCmd)
 	rootCmd.Execute()
 }

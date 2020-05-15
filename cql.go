@@ -33,7 +33,7 @@ INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 const INSERT_TRANSFER = `
 INSERT INTO transfers
   (id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
-  VALUES (?, ?, ?, ?, ?, ?, ‘pending’)
+  VALUES (?, ?, ?, ?, ?, ?, 'new')
   IF NOT EXISTS
 `
 
@@ -42,6 +42,10 @@ UPDATE transfers USING TTL 300
   SET client = ?, state = ?
   WHERE id = ?
   IF client = ?
+`
+
+const DELETE_TRANSFER = `
+DELETE FROM transfers WHERE id = ? IF client = ? AND state = ?
 `
 
 const CHECK_SRC_ACCOUNT = `
@@ -53,14 +57,14 @@ UPDATE accounts
 
 const CHECK_DST_ACCOUNT = `
 UPDATE accounts
-  SET pending_transfer=$uuid
+  SET pending_transfer = ?
   WHERE bic = ? AND ban = ?
   IF pending_transfer = null
 `
 
 const UPDATE_BALANCE = `
 UPDATE accounts
-  SET pending_transfer = null balance = ?
+  SET pending_transfer = null, balance = ?
   WHERE bic = ? AND ban = ?
   IF pending_transfer = ?
 `

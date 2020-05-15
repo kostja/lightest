@@ -78,9 +78,9 @@ func populate(cmd *cobra.Command, n int) error {
 	}
 	var wg sync.WaitGroup
 
-	for i := 1; i <= 10; i++ {
+	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go worker(i, &wg)
+		go worker(i+1, &wg)
 	}
 
 	wg.Wait()
