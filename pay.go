@@ -6,7 +6,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
-	"math/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -42,7 +41,7 @@ func (t *Transfer) Make(
 	client_id gocql.UUID,
 	src_bic string, src_ban string,
 	dst_bic string, dst_ban string,
-	amount inf.Dec, stats *PayStats) error {
+	amount *inf.Dec, stats *PayStats) error {
 
 	var applied bool
 	var err error
@@ -59,7 +58,7 @@ func (t *Transfer) Make(
 		return merry.New(fmt.Sprintf("Failed to create a transfer %v: a duplicate transfer exists",
 			transfer_id))
 	}
-	// Change transfer state
+	// Change transfer state to pending and set client id
 	t.update.Bind(client_id, "pending", transfer_id, nil)
 	if applied, err = t.update.MapScanCAS(row); err != nil {
 		return merry.Wrap(err)
@@ -73,6 +72,7 @@ func (t *Transfer) Make(
 	applied = false
 	sleepDuration, _ := time.ParseDuration("0.1s")
 	maxSleepDuration, _ := time.ParseDuration("10s")
+
 	for applied == false {
 
 		newSleepDuration := sleepDuration * 2
@@ -128,7 +128,7 @@ func (t *Transfer) CompleteLockedTransfer(
 	client_id gocql.UUID, transfer_id gocql.UUID,
 	src_bic string, src_ban string,
 	dst_bic string, dst_ban string,
-	amount inf.Dec) error {
+	amount *inf.Dec) error {
 
 	// From now on we can ignore 'applied' - the record may
 	// not be applied only if someone completed our transfer or
@@ -183,25 +183,23 @@ func pay(cmd *cobra.Command, n int) error {
 		return merry.Wrap(err)
 	}
 	var stats PayStats
+	var rand FixedRandomSource
+	rand.Init()
 
 	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 
 		defer wg.Done()
-
-		rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 		var transfer Transfer
 		transfer.New(session)
 
 		for i := 0; i < n_transfers; i++ {
 
-			amount := inf.NewDec(rand.Int63n(1000), inf.Scale(rand.Int63n(100)))
-			src_bic := gocql.TimeUUID().String()
-			src_ban := gocql.TimeUUID().String()
-			dst_bic := gocql.TimeUUID().String()
-			dst_ban := gocql.TimeUUID().String()
+			amount := rand.NewTransferAmount()
+			src_bic, src_ban := rand.BicAndBan()
+			dst_bic, dst_ban := rand.BicAndBan()
 
-			err := transfer.Make(client_id, src_bic, src_ban, dst_bic, dst_ban, *amount, &stats)
+			err := transfer.Make(client_id, src_bic, src_ban, dst_bic, dst_ban, amount, &stats)
 			if err != nil {
 				llog.Printf("%+v", err)
 				atomic.AddUint64(&stats.errors, 1)

@@ -1,4 +1,5 @@
 - implement pay()
+  * ensure source and destination accounts are never the same
   * add handling for non-existing rows
   * use shorter identifiers for src_bic, src_ban, client id,
   * add handling of insufficient funds

@@ -5,8 +5,6 @@ import (
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
-	"gopkg.in/inf.v0"
-	"math/rand"
 	"runtime"
 	"sync"
 	"time"
@@ -60,14 +58,15 @@ func populate(cmd *cobra.Command, n int) error {
 
 		llog.Printf("Worker %d starting\n", id)
 
-		rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+		var rand FixedRandomSource
+		rand.Init()
+
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
 		llog.Printf("Inserting %d accounts", n_accounts)
 		for i := 0; i < n_accounts; i++ {
-			bic := gocql.TimeUUID().String()
-			ban := gocql.TimeUUID().String()
-			balance := inf.NewDec(rand.Int63n(100000), 0)
+			bic, ban := rand.NewBicAndBan()
+			balance := rand.NewStartBalance()
 			stmt.Bind(bic, ban, balance)
 			if err = stmt.Exec(); err != nil {
 				llog.Fatalf("%+v", err)
