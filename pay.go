@@ -184,7 +184,7 @@ func pay(cmd *cobra.Command, n int) error {
 	}
 	var stats PayStats
 	var rand FixedRandomSource
-	rand.Init()
+	rand.Init(session)
 
 	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 

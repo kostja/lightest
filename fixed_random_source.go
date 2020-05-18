@@ -9,10 +9,13 @@ import (
 	"time"
 )
 
-var accounts struct {
-	once sync.Once
-	bics []string
+type BicAndBans struct {
+	bic  string
+	bans []string
 }
+
+var accounts []BicAndBans
+var accounts_once sync.Once
 
 // Represents a random data generator for the load.
 //
@@ -60,18 +63,38 @@ func createRandomBan() string {
 
 }
 
-func (r *FixedRandomSource) Init() {
+func (r *FixedRandomSource) Init(session *gocql.Session) {
 
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	create_new_bics := func() {
 		n_bics := rand.Intn(500)
-		accounts.bics = make([]string, 0, n_bics)
+		accounts = make([]BicAndBans, 0, n_bics)
 		for i := 0; i < n_bics; i++ {
-			accounts.bics = append(accounts.bics, createRandomBic())
+			accounts = append(accounts, BicAndBans{bic: createRandomBic()})
 		}
 	}
-	accounts.once.Do(create_new_bics)
+	load_existing_bics := func() {
+		iter := session.Query("SELECT bic, ban FROM accounts").Iter()
+		var bic, ban string
+		bics := map[string][]string{}
+		for iter.Scan(&bic, &ban) {
+			bics[bic] = append(bics[bic], ban)
+		}
+		if err := iter.Close(); err != nil {
+			llog.Fatal(err)
+		}
+		n_bics := len(bics)
+		accounts = make([]BicAndBans, 0, n_bics)
+		for k, v := range bics {
+			accounts = append(accounts, BicAndBans{bic: k, bans: v})
+		}
+	}
+	if session != nil {
+		accounts_once.Do(load_existing_bics)
+	} else {
+		accounts_once.Do(create_new_bics)
+	}
 }
 
 // Return a globally unique identifier
@@ -86,7 +109,7 @@ func (r *FixedRandomSource) NewTransferId() gocql.UUID {
 }
 
 func (r *FixedRandomSource) NewBicAndBan() (string, string) {
-	bic := accounts.bics[rand.Intn(len(accounts.bics))]
+	bic := accounts[rand.Intn(len(accounts))].bic
 	ban := createRandomBan()
 	return bic, ban
 }
@@ -100,7 +123,10 @@ func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
 }
 
 func (r *FixedRandomSource) BicAndBan() (string, string) {
-	return r.NewBicAndBan()
+	bic_pos := rand.Intn(len(accounts))
+	ban_pos := rand.Intn(len(accounts[bic_pos].bans))
+
+	return accounts[bic_pos].bic, accounts[bic_pos].bans[ban_pos]
 }
 
 func (r *FixedRandomSource) HotBicAndBan() (string, string) {

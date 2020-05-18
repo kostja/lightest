@@ -1,16 +1,16 @@
 - implement pay()
-  * ensure source and destination accounts are never the same
   * add handling for non-existing rows
-  * use shorter identifiers for src_bic, src_ban, client id,
   * add handling of insufficient funds
   * decimal arithmetics
-  * fetch old balances
   * add handling for pending_transfer != transfer_id
-  * add handlign for client  mistmatch
+  * add handlign for client  mismatch
   * measure latency
-  * add retrieval of a subset existing bic/bans, not random bic/bans
   * implement recover
-  done * debug straightforward pay
+  * ensure source and destination accounts are never the same
+done * use shorter identifiers for src_bic, src_ban, client id,
+done * fetch old balances
+done * add retrieval of a subset existing bic/bans, not random bic/bans
+done * debug straightforward pay
 - implement pop()
 - implement check()
 - add latency calculation min/max/99

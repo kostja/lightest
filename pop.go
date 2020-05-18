@@ -59,7 +59,7 @@ func populate(cmd *cobra.Command, n int) error {
 		llog.Printf("Worker %d starting\n", id)
 
 		var rand FixedRandomSource
-		rand.Init()
+		rand.Init(nil)
 
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
