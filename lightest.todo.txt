@@ -3,7 +3,7 @@
   * add handling of insufficient funds
   * decimal arithmetics
   * add handling for pending_transfer != transfer_id
-  * add handlign for client  mismatch
+  * add handling for client  mismatch
   * measure latency
   * implement recover
   * ensure source and destination accounts are never the same

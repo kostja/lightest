@@ -15,15 +15,15 @@ CREATE TABLE accounts (
 
 const CREATE_TRANSFERS_TAB = `
 CREATE TABLE transfers (
-    id UUID, -- transfers UUID
+    transfer_id UUID, -- transfers UUID
     src_bic TEXT, -- source bank identification code
     src_ban TEXT, -- source bank account number
     dst_bic TEXT, -- destination bank identification code
     dst_ban TEXT, -- destination bank account number
     amount DECIMAL, -- transfer amount
     state TEXT, -- ‘pending’, ‘in progress’, ‘complete’
-    client UUID, -- the client performing the transfer
-    PRIMARY KEY (id)
+    client_id UUID, -- the client performing the transfer
+    PRIMARY KEY (transfer_id)
 )`
 
 const INSERT_ACCOUNT = `
@@ -32,34 +32,27 @@ INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 
 const INSERT_TRANSFER = `
 INSERT INTO transfers
-  (id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
+  (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
   VALUES (?, ?, ?, ?, ?, ?, 'new')
   IF NOT EXISTS
 `
 
 const UPDATE_TRANSFER = `
 UPDATE transfers USING TTL 300
-  SET client = ?, state = ?
-  WHERE id = ?
-  IF client = ?
+  SET client_id = ?, state = ?
+  WHERE transfer_id = ?
+  IF client_id = ?
 `
 
 const DELETE_TRANSFER = `
-DELETE FROM transfers WHERE id = ? IF client = ? AND state = ?
+DELETE FROM transfers WHERE transfer_id = ? IF client_id = ? AND state = ?
 `
 
-const CHECK_SRC_ACCOUNT = `
+const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = null AND balance > ?
-`
-
-const CHECK_DST_ACCOUNT = `
-UPDATE accounts
-  SET pending_transfer = ?
-  WHERE bic = ? AND ban = ?
-  IF pending_transfer = null
+  IF pending_transfer = ?
 `
 
 const UPDATE_BALANCE = `

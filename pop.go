@@ -56,14 +56,12 @@ func populate(cmd *cobra.Command, n int) error {
 
 		defer wg.Done()
 
-		llog.Printf("Worker %d starting\n", id)
-
 		var rand FixedRandomSource
 		rand.Init(nil)
 
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
-		llog.Printf("Inserting %d accounts", n_accounts)
+		llog.Printf("Worker %d inserting %d accounts", id, n_accounts)
 		for i := 0; i < n_accounts; i++ {
 			bic, ban := rand.NewBicAndBan()
 			balance := rand.NewStartBalance()
@@ -72,8 +70,6 @@ func populate(cmd *cobra.Command, n int) error {
 				llog.Fatalf("%+v", err)
 			}
 		}
-
-		llog.Printf("Worker %d done\n", id)
 	}
 	var wg sync.WaitGroup
 
