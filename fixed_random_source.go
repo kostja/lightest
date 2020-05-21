@@ -90,6 +90,8 @@ func (r *FixedRandomSource) Init(session *gocql.Session) {
 			accounts = append(accounts, BicAndBans{bic: k, bans: v})
 		}
 	}
+	// Each worker gorotuine uses its own instance of FixedRandomSource,
+	// but they share the data about existing BICs and BANs.
 	if session != nil {
 		accounts_once.Do(load_existing_bics)
 	} else {
@@ -103,32 +105,50 @@ func (r *FixedRandomSource) NewClientId() gocql.UUID {
 	return gocql.TimeUUID()
 }
 
-// Return a globally unique identifier
+// Return a globally unique identifier, each transfer
+// is unique
 func (r *FixedRandomSource) NewTransferId() gocql.UUID {
 	return gocql.TimeUUID()
 }
 
+// Create a new BIC and BAN pair
 func (r *FixedRandomSource) NewBicAndBan() (string, string) {
 	bic := accounts[rand.Intn(len(accounts))].bic
 	ban := createRandomBan()
 	return bic, ban
 }
 
+// Create a new random start balance
 func (r *FixedRandomSource) NewStartBalance() *inf.Dec {
 	return inf.NewDec(rand.Int63n(100000), 0)
 }
 
+// Crate a new random transfer
 func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
 	return inf.NewDec(rand.Int63n(10000), inf.Scale(rand.Int63n(3)))
 }
 
-func (r *FixedRandomSource) BicAndBan() (string, string) {
-	bic_pos := rand.Intn(len(accounts))
-	ban_pos := rand.Intn(len(accounts[bic_pos].bans))
+// Find an existing BIC and BAN pair for transaction.
+// To avoid yielding a duplicate pair when called
+// twice in a row, pass pointers to previous BIC and BAN,
+// in this case the new pair is guaranteed to be distinct.
+func (r *FixedRandomSource) BicAndBan(src ...string) (string, string) {
+	for {
+		bic_pos := rand.Intn(len(accounts))
+		ban_pos := rand.Intn(len(accounts[bic_pos].bans))
 
-	return accounts[bic_pos].bic, accounts[bic_pos].bans[ban_pos]
+		bic, ban := accounts[bic_pos].bic, accounts[bic_pos].bans[ban_pos]
+		if len(src) < 1 || bic != src[0] || len(src) < 2 || ban != src[1] {
+			return bic, ban
+		}
+	}
 }
 
-func (r *FixedRandomSource) HotBicAndBan() (string, string) {
-	return r.BicAndBan()
+// Find an existing BIC and BAN pair for transaction.
+// Uses a normal distribution to return "hot" pairs.
+// To avoid yielding a duplicate pair when called
+// twice in a row, pass pointers to previous BIC and BAN,
+// in this case the new pair is guaranteed to be distinct.
+func (r *FixedRandomSource) HotBicAndBan(src ...string) (string, string) {
+	return r.BicAndBan(src...)
 }

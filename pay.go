@@ -45,10 +45,12 @@ func (t *Transfer) Make(
 
 	var applied bool
 	var err error
-	row := map[string]interface{}{}
+	type Row = map[string]interface{}
+	var row Row
 
 	// Register a new transfer
 	transfer_id := gocql.TimeUUID()
+	row = Row{}
 	t.insert.Bind(transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount)
 	if applied, err = t.insert.MapScanCAS(row); err != nil {
 		return merry.Wrap(err)
@@ -60,6 +62,7 @@ func (t *Transfer) Make(
 	}
 	// Change transfer state to pending and set client id
 	t.update.Bind(client_id, "pending", transfer_id, nil)
+	row = Row{}
 	if applied, err = t.update.MapScanCAS(row); err != nil {
 		return merry.Wrap(err)
 	}
@@ -82,6 +85,7 @@ func (t *Transfer) Make(
 
 		// Lock source account
 		t.check_src_account.Bind(transfer_id, src_bic, src_ban, amount)
+		row = Row{}
 		if applied, err = t.check_src_account.MapScanCAS(row); err != nil {
 			return merry.Wrap(err)
 		}
@@ -102,6 +106,7 @@ func (t *Transfer) Make(
 		}
 		// Lock destination account
 		t.check_dst_account.Bind(transfer_id, dst_bic, dst_ban)
+		row = Row{}
 		if applied, err = t.check_dst_account.MapScanCAS(row); err != nil {
 			return merry.Wrap(err)
 		}
@@ -197,7 +202,10 @@ func pay(cmd *cobra.Command, n int) error {
 
 			amount := rand.NewTransferAmount()
 			src_bic, src_ban := rand.BicAndBan()
-			dst_bic, dst_ban := rand.BicAndBan()
+			fmt.Printf("%s %s\n", src_bic, src_ban)
+
+			dst_bic, dst_ban := rand.BicAndBan(src_bic, src_ban)
+			fmt.Printf("%s %s\n", dst_bic, dst_ban)
 
 			err := transfer.Make(client_id, src_bic, src_ban, dst_bic, dst_ban, amount, &stats)
 			if err != nil {
