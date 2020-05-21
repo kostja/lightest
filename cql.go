@@ -52,7 +52,7 @@ const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = ?
+  IF pending_transfer = ? AND balance != null
 `
 
 const UPDATE_BALANCE = `

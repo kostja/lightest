@@ -67,7 +67,7 @@ func (t *Transfer) Make(
 			transfer_id))
 	}
 
-	// Always lock the bigger account first, to avoid deadlocks
+	// Always lock the bigger account first, to avoid livelocks
 	var lockOrder [2]struct {
 		bic string
 		ban string
@@ -84,7 +84,7 @@ func (t *Transfer) Make(
 		lockOrder[1].ban = src_ban
 	}
 
-	sleepDuration := time.Millisecond * time.Duration(rand.Intn(10))
+	sleepDuration := time.Millisecond * time.Duration(rand.Intn(5))
 	maxSleepDuration, _ := time.ParseDuration("10s")
 	var i = 0
 	for i < 2 {
@@ -109,8 +109,10 @@ func (t *Transfer) Make(
 				return t.SetTransferState(client_id, nil, transfer_id, "complete")
 			}
 			// pending_transfer != null
-			// @todo: check if it was orphaned and repair
-			llog.Printf("Restarting because there is a pending transfer %v", row["pending_transfer"])
+			// @todo: check if the transfer is orphaned and repair
+			llog.Printf("Restarting after sleeping %v, pending transfer %v",
+				sleepDuration, row["pending_transfer"])
+			atomic.AddUint64(&stats.retries, 1)
 			time.Sleep(sleepDuration)
 			sleepDuration := sleepDuration * 2
 			if sleepDuration > maxSleepDuration {
