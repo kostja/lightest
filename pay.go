@@ -238,7 +238,9 @@ func pay(cmd *cobra.Command, n int) error {
 			accounts[0].bic, accounts[0].ban = rand.BicAndBan()
 			accounts[1].bic, accounts[1].ban = rand.BicAndBan(accounts[0].bic, accounts[0].ban)
 
+			cookie := StatsRequestStart()
 			err := transfer.Make(client_id, accounts, amount, &stats)
+			StatsRequestEnd(cookie)
 			if err != nil {
 				llog.Errorf("%+v", err)
 				atomic.AddUint64(&stats.errors, 1)

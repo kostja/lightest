@@ -67,7 +67,9 @@ bandwidth along the way.`,
 			}
 		},
 	}
+	StatsInit()
 	payCmd.PersistentFlags().IntP("transfers", "n", 100, "Number of transfers to make")
 	rootCmd.AddCommand(popCmd, payCmd)
 	rootCmd.Execute()
+	StatsReportSummaries()
 }

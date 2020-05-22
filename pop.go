@@ -63,12 +63,14 @@ func populate(cmd *cobra.Command, n int) error {
 		stmt.Consistency(gocql.One)
 		llog.Tracef("Worker %d inserting %d accounts", id, n_accounts)
 		for i := 0; i < n_accounts; i++ {
+			cookie := StatsRequestStart()
 			bic, ban := rand.NewBicAndBan()
 			balance := rand.NewStartBalance()
 			stmt.Bind(bic, ban, balance)
 			if err = stmt.Exec(); err != nil {
 				llog.Fatalf("%+v", err)
 			}
+			StatsRequestEnd(cookie)
 		}
 	}
 	var wg sync.WaitGroup
