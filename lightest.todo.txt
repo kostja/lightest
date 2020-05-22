@@ -9,15 +9,15 @@ done * add retrieval of a subset existing bic/bans, not random bic/bans
 done * debug straightforward pay
 done - implement pop()
 done - implement check()
-- add rps calculation
-  https://github.com/mxmCherry/movavg
-- add latency calculation min/max/99
+done - add total rps calculation
+done - add latency calculation min/max
+- add latency 95/99/99.9
 - make the number of workers configurable
     https://github.com/spenczar/tdigest
 - make scylla/cassandra credentials configurable
-
 - add --report-interval (default 5 seconds) reporting
-  the latency min/max/99 and rps every report interval
+- add latency min/max/avg/99/99.9 to --report-interval
+- add rps moving average to --report-interval
 - implement repair:
   * add handling for pending_transfer != transfer_id
   * add handling for client  mismatch
