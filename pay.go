@@ -121,6 +121,8 @@ func (t *Transfer) Make(
 			if sleepDuration > maxSleepDuration {
 				sleepDuration = maxSleepDuration
 			}
+			// Restart locking
+			i = 0
 		} else {
 			// In Scylla, the previous row returned even if LWT is applied.
 			// In Cassandra, make a separate query.
@@ -139,12 +141,12 @@ func (t *Transfer) Make(
 		}
 	}
 	if amount.Cmp(accounts[0].balance) < 0 {
+		llog.Printf("Moving %v from %v to %v", amount, accounts[0].balance, accounts[1].balance)
 		accounts[0].balance.Sub(accounts[0].balance, amount)
 		accounts[1].balance.Add(accounts[1].balance, amount)
 	} else {
-		llog.Printf("Insufficient balance: %v %v", accounts[0].balance, amount)
+		llog.Printf("Insufficient balance %v to withdraw %v", accounts[0].balance, amount)
 	}
-	llog.Printf("src_balance = %v, dst_balance = %v", accounts[0].balance, accounts[1].balance)
 	return t.CompleteLockedTransfer(client_id, transfer_id, accounts)
 }
 
@@ -169,7 +171,6 @@ func (t *Transfer) CompleteLockedTransfer(
 	if err := t.update_balance.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
-	llog.Printf("Transfer %v complete", transfer_id)
 	// Move transfer to "complete". Typically a transfer is kept
 	// for a few years, we just delete it for simplicity.
 	t.delete_.Bind(transfer_id, client_id, "in progress")
@@ -218,6 +219,9 @@ func pay(cmd *cobra.Command, n int) error {
 	var stats PayStats
 	var rand FixedRandomSource
 	rand.Init(session)
+	sum := check(session, nil)
+
+	llog.Printf("Initial balance: %v", sum)
 
 	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 
@@ -257,6 +261,7 @@ func pay(cmd *cobra.Command, n int) error {
 
 	wg.Wait()
 
+	llog.Printf("Final balance: %v", check(session, sum))
 	fmt.Printf("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
 		stats.errors,
 		stats.retries,

@@ -87,7 +87,7 @@ func populate(cmd *cobra.Command, n int) error {
 
 	wg.Wait()
 
-	llog.Printf("Done")
+	llog.Printf("Done, total balance: %v", check(session, nil))
 
 	return nil
 }

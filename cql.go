@@ -69,6 +69,11 @@ UPDATE accounts
   IF pending_transfer = ?
 `
 
+const CHECK_BALANCE = `
+SELECT SUM(balance)
+  FROM accounts
+`
+
 const DROP_KS = `
 DROP KEYSPACE IF EXISTS lightest
 `
