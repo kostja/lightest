@@ -25,7 +25,15 @@ type Transfer struct {
 	update         *gocql.Query
 	delete_        *gocql.Query
 	lock_account   *gocql.Query
+	fetch_balance  *gocql.Query
 	update_balance *gocql.Query
+}
+
+type Account struct {
+	bic       string
+	ban       string
+	balance   *inf.Dec
+	lockOrder int
 }
 
 func (t *Transfer) New(session *gocql.Session) {
@@ -33,13 +41,12 @@ func (t *Transfer) New(session *gocql.Session) {
 	t.update = session.Query(UPDATE_TRANSFER)
 	t.delete_ = session.Query(DELETE_TRANSFER)
 	t.lock_account = session.Query(LOCK_ACCOUNT)
+	t.fetch_balance = session.Query(FETCH_BALANCE)
 	t.update_balance = session.Query(UPDATE_BALANCE)
 }
 
 func (t *Transfer) Make(
-	client_id gocql.UUID,
-	src_bic string, src_ban string,
-	dst_bic string, dst_ban string,
+	client_id gocql.UUID, accounts []Account,
 	amount *inf.Dec, stats *PayStats) error {
 
 	type Row = map[string]interface{}
@@ -48,7 +55,9 @@ func (t *Transfer) Make(
 	// Register a new transfer
 	transfer_id := gocql.TimeUUID()
 	row = Row{}
-	t.insert.Bind(transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount)
+	t.insert.Bind(transfer_id,
+		accounts[0].bic, accounts[0].ban,
+		accounts[1].bic, accounts[1].ban, amount)
 	if applied, err := t.insert.MapScanCAS(row); err != nil {
 		return merry.Wrap(err)
 	} else if !applied {
@@ -67,45 +76,39 @@ func (t *Transfer) Make(
 			transfer_id))
 	}
 
-	// Always lock the bigger account first, to avoid livelocks
-	var lockOrder [2]struct {
-		bic string
-		ban string
-	}
-	if dst_bic > src_bic || dst_bic == src_bic && dst_ban > src_ban {
-		lockOrder[0].bic = src_bic
-		lockOrder[0].ban = src_ban
-		lockOrder[1].bic = dst_bic
-		lockOrder[1].ban = dst_ban
+	// Always lock accounts in lexicographical order to avoid livelocks
+	if accounts[1].bic > accounts[0].bic ||
+		accounts[1].bic == accounts[0].bic &&
+			accounts[1].ban > accounts[0].ban {
+		accounts[1].lockOrder = 1
 	} else {
-		lockOrder[0].bic = dst_bic
-		lockOrder[0].ban = dst_ban
-		lockOrder[1].bic = src_bic
-		lockOrder[1].ban = src_ban
+		accounts[0].lockOrder = 1
 	}
-
-	sleepDuration := time.Millisecond * time.Duration(rand.Intn(5))
+	sleepDuration := time.Millisecond*time.Duration(rand.Intn(10)) + time.Millisecond
 	maxSleepDuration, _ := time.ParseDuration("10s")
 	var i = 0
 	for i < 2 {
-		t.lock_account.Bind(transfer_id, lockOrder[i].bic, lockOrder[i].ban, nil)
+		account := &accounts[accounts[i].lockOrder]
+		t.lock_account.Bind(transfer_id, account.bic, account.ban, nil)
 		row = Row{}
 		if applied, err := t.lock_account.MapScanCAS(row); !applied || err != nil {
 			if i == 1 {
-				t.lock_account.Bind(nil, lockOrder[0].bic, lockOrder[0].ban, transfer_id)
+				// Remove the pending transfer from the previously
+				// locked account, do not wait with locks.
+				account = &accounts[accounts[0].lockOrder]
+				t.lock_account.Bind(nil, account.bic, account.ban, transfer_id)
 				if err1 := t.lock_account.Exec(); err1 != nil {
 					return merry.WithCause(err1, err)
 				}
 			}
-			// Here we should check for transient errors, such as
-			// query timeout, and retry.
+			// Check for transient errors, such as query timeout, and retry.
 			// Not doing it in scope of a demo
 			if err != nil {
 				return merry.Wrap(err)
 			}
 			if len(row) == 0 {
 				atomic.AddUint64(&stats.no_such_account, 1)
-				llog.Printf("Account %v not found, ending transfer %v", src_ban, transfer_id)
+				llog.Printf("Account %v not found, ending transfer %v", account.ban, transfer_id)
 				return t.SetTransferState(client_id, nil, transfer_id, "complete")
 			}
 			// pending_transfer != null
@@ -114,22 +117,39 @@ func (t *Transfer) Make(
 				sleepDuration, row["pending_transfer"])
 			atomic.AddUint64(&stats.retries, 1)
 			time.Sleep(sleepDuration)
-			sleepDuration := sleepDuration * 2
+			sleepDuration = sleepDuration * 2
 			if sleepDuration > maxSleepDuration {
 				sleepDuration = maxSleepDuration
 			}
+		} else {
+			// In Scylla, the previous row returned even if LWT is applied.
+			// In Cassandra, make a separate query.
+			if val, exists := row["balance"]; exists {
+				account.balance = val.(*inf.Dec)
+			} else {
+				// Support Cassandra which doens't provide balance
+				t.fetch_balance.Bind(account.bic, account.ban)
+				row = Row{}
+				if _, err := t.fetch_balance.MapScanCAS(row); err != nil {
+					return merry.Wrap(err)
+				}
+				account.balance = row["balance"].(*inf.Dec)
+			}
+			i++
 		}
-		i++
 	}
-	return t.CompleteLockedTransfer(client_id, transfer_id, src_bic, src_ban,
-		dst_bic, dst_ban, amount)
+	if amount.Cmp(accounts[0].balance) < 0 {
+		accounts[0].balance.Sub(accounts[0].balance, amount)
+		accounts[1].balance.Add(accounts[1].balance, amount)
+	} else {
+		llog.Printf("Insufficient balance: %v %v", accounts[0].balance, amount)
+	}
+	llog.Printf("src_balance = %v, dst_balance = %v", accounts[0].balance, accounts[1].balance)
+	return t.CompleteLockedTransfer(client_id, transfer_id, accounts)
 }
 
 func (t *Transfer) CompleteLockedTransfer(
-	client_id gocql.UUID, transfer_id gocql.UUID,
-	src_bic string, src_ban string,
-	dst_bic string, dst_ban string,
-	amount *inf.Dec) error {
+	client_id gocql.UUID, transfer_id gocql.UUID, accounts []Account) error {
 
 	// From now on we can ignore 'applied' - the record may
 	// not be applied only if someone completed our transfer or
@@ -141,17 +161,15 @@ func (t *Transfer) CompleteLockedTransfer(
 		return merry.Wrap(err)
 	}
 
-	new_src_balance := amount
-	t.update_balance.Bind(new_src_balance, src_bic, src_ban, transfer_id)
+	t.update_balance.Bind(accounts[0].balance, accounts[0].bic, accounts[0].ban, transfer_id)
 	if err := t.update_balance.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
-	new_dst_balance := amount
-	t.update_balance.Bind(new_dst_balance, dst_bic, dst_ban, transfer_id)
+	t.update_balance.Bind(accounts[1].balance, accounts[1].bic, accounts[1].ban, transfer_id)
 	if err := t.update_balance.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
-	llog.Printf("Transfer %v of %v complete", transfer_id, amount)
+	llog.Printf("Transfer %v complete", transfer_id)
 	// Move transfer to "complete". Typically a transfer is kept
 	// for a few years, we just delete it for simplicity.
 	t.delete_.Bind(transfer_id, client_id, "in progress")
@@ -211,10 +229,11 @@ func pay(cmd *cobra.Command, n int) error {
 		for i := 0; i < n_transfers; i++ {
 
 			amount := rand.NewTransferAmount()
-			src_bic, src_ban := rand.BicAndBan()
-			dst_bic, dst_ban := rand.BicAndBan(src_bic, src_ban)
+			accounts := make([]Account, 2, 2)
+			accounts[0].bic, accounts[0].ban = rand.BicAndBan()
+			accounts[1].bic, accounts[1].ban = rand.BicAndBan(accounts[0].bic, accounts[0].ban)
 
-			err := transfer.Make(client_id, src_bic, src_ban, dst_bic, dst_ban, amount, &stats)
+			err := transfer.Make(client_id, accounts, amount, &stats)
 			if err != nil {
 				llog.Printf("%+v", err)
 				atomic.AddUint64(&stats.errors, 1)

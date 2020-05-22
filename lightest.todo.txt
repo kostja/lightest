@@ -1,17 +1,18 @@
 - implement pay()
-  * add handling for non-existing rows
-  * add handling of insufficient funds
-  * decimal arithmetics
-  * add handling for pending_transfer != transfer_id
-  * add handling for client  mismatch
-  * measure latency
-  * implement recover
-  * ensure source and destination accounts are never the same
+done  * add handling for non-existing rows
+done  * add handling of insufficient funds
+done  * decimal arithmetics
+done  * ensure source and destination accounts are never the same
 done * use shorter identifiers for src_bic, src_ban, client id,
 done * fetch old balances
 done * add retrieval of a subset existing bic/bans, not random bic/bans
 done * debug straightforward pay
-- implement pop()
+done - implement pop()
 - implement check()
 - add latency calculation min/max/99
 - make the number of workers configurable
+- implement repair:
+  * add handling for pending_transfer != transfer_id
+  * add handling for client  mismatch
+- populate should resume until it performs exactly N writes
+- populate should generate dups

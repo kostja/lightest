@@ -55,6 +55,13 @@ UPDATE accounts
   IF pending_transfer = ? AND balance != null
 `
 
+const FETCH_BALANCE = `
+UPDATE accounts
+  SET balance = null
+  WHERE bic = ? AND ban = ?
+  IF balance = null
+`
+
 const UPDATE_BALANCE = `
 UPDATE accounts
   SET pending_transfer = null, balance = ?
