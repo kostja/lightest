@@ -14,6 +14,8 @@ type stats struct {
 	latency_max time.Duration
 	latency_avg time.Duration
 	tdigest     *tdigest.TDigest
+	queue       chan time.Duration
+	done        chan bool
 }
 
 var s stats
@@ -22,9 +24,32 @@ type cookie struct {
 	time time.Time
 }
 
+func statsWorker() {
+	for true {
+		elapsed, more := <-s.queue
+
+		s.n_requests++
+		s.cputime += elapsed
+		if elapsed > s.latency_max {
+			s.latency_max = elapsed
+		}
+		if s.latency_min == 0 || s.latency_min > elapsed {
+			s.latency_min = elapsed
+		}
+		s.tdigest.Add(elapsed.Seconds(), 1)
+		if !more {
+			break
+		}
+	}
+	s.done <- true
+}
+
 func StatsInit() {
 	s.starttime = time.Now()
 	s.tdigest = tdigest.New()
+	s.queue = make(chan time.Duration, 1000)
+	s.done = make(chan bool, 1)
+	go statsWorker()
 }
 
 func StatsRequestStart() cookie {
@@ -34,19 +59,16 @@ func StatsRequestStart() cookie {
 }
 
 func StatsRequestEnd(c cookie) {
-	s.n_requests++
 	elapsed := time.Since(c.time)
-	s.cputime += elapsed
-	if elapsed > s.latency_max {
-		s.latency_max = elapsed
+	if elapsed != 0 {
+		s.queue <- elapsed
 	}
-	if s.latency_min == 0 || s.latency_min > elapsed {
-		s.latency_min = elapsed
-	}
-	s.tdigest.Add(elapsed.Seconds(), 1)
 }
 
 func StatsReportSummaries() {
+	// Stop background work
+	close(s.queue)
+	<-s.done
 
 	wallclocktime := time.Since(s.starttime).Seconds()
 	llog.Infof("Total time: %.3fs, %v t/sec",
