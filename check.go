@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gocql/gocql"
+	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
 )
 

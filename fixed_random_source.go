@@ -3,6 +3,7 @@ package main
 import (
 	//	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
+	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
 	"math/rand"
 	"sync"
@@ -82,7 +83,7 @@ func (r *FixedRandomSource) Init(session *gocql.Session) {
 			bics[bic] = append(bics[bic], ban)
 		}
 		if err := iter.Close(); err != nil {
-			llog.Fatal(err)
+			llog.Fatalf("%v", err)
 		}
 		n_bics := len(bics)
 		accounts = make([]BicAndBans, 0, n_bics)

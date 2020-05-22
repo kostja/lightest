@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
+	llog "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
 	"math/rand"
@@ -108,12 +109,12 @@ func (t *Transfer) Make(
 			}
 			if len(row) == 0 {
 				atomic.AddUint64(&stats.no_such_account, 1)
-				llog.Printf("Account %v not found, ending transfer %v", account.ban, transfer_id)
+				llog.Tracef("Account %v not found, ending transfer %v", account.ban, transfer_id)
 				return t.SetTransferState(client_id, nil, transfer_id, "complete")
 			}
 			// pending_transfer != null
 			// @todo: check if the transfer is orphaned and repair
-			llog.Printf("Restarting after sleeping %v, pending transfer %v",
+			llog.Tracef("Restarting after sleeping %v, pending transfer %v",
 				sleepDuration, row["pending_transfer"])
 			atomic.AddUint64(&stats.retries, 1)
 			time.Sleep(sleepDuration)
@@ -141,11 +142,11 @@ func (t *Transfer) Make(
 		}
 	}
 	if amount.Cmp(accounts[0].balance) < 0 {
-		llog.Printf("Moving %v from %v to %v", amount, accounts[0].balance, accounts[1].balance)
+		llog.Tracef("Moving %v from %v to %v", amount, accounts[0].balance, accounts[1].balance)
 		accounts[0].balance.Sub(accounts[0].balance, amount)
 		accounts[1].balance.Add(accounts[1].balance, amount)
 	} else {
-		llog.Printf("Insufficient balance %v to withdraw %v", accounts[0].balance, amount)
+		llog.Tracef("Insufficient balance %v to withdraw %v", accounts[0].balance, amount)
 	}
 	return t.CompleteLockedTransfer(client_id, transfer_id, accounts)
 }
@@ -199,7 +200,7 @@ func pay(cmd *cobra.Command, n int) error {
 	if workers > n {
 		workers = n
 	}
-	fmt.Printf("Making %d transfers using %d workers on %d cores \n",
+	llog.Infof("Making %d transfers using %d workers on %d cores \n",
 		n, workers, cores)
 
 	cluster := gocql.NewCluster("localhost")
@@ -211,7 +212,7 @@ func pay(cmd *cobra.Command, n int) error {
 	cluster.Keyspace = "lightest"
 	cluster.Consistency = gocql.One
 
-	llog.Printf("Establishing connection to the cluster")
+	llog.Infof("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
 	if err != nil {
 		return merry.Wrap(err)
@@ -221,7 +222,7 @@ func pay(cmd *cobra.Command, n int) error {
 	rand.Init(session)
 	sum := check(session, nil)
 
-	llog.Printf("Initial balance: %v", sum)
+	llog.Infof("Initial balance: %v", sum)
 
 	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 
@@ -239,7 +240,7 @@ func pay(cmd *cobra.Command, n int) error {
 
 			err := transfer.Make(client_id, accounts, amount, &stats)
 			if err != nil {
-				llog.Printf("%+v", err)
+				llog.Errorf("%+v", err)
 				atomic.AddUint64(&stats.errors, 1)
 				return
 			}
@@ -261,8 +262,8 @@ func pay(cmd *cobra.Command, n int) error {
 
 	wg.Wait()
 
-	llog.Printf("Final balance: %v", check(session, sum))
-	fmt.Printf("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
+	llog.Infof("Final balance: %v", check(session, sum))
+	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
 		stats.errors,
 		stats.retries,
 		stats.recoveries,

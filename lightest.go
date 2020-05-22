@@ -1,16 +1,22 @@
 package main
 
 import (
+	llog "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"log"
 	"os"
 )
 
-var llog *log.Logger
-
 func main() {
 
-	llog = log.New(os.Stdout, "", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+	llog.SetOutput(os.Stdout)
+
+	formatter := new(llog.TextFormatter)
+	// Stackoverflow wisdom
+	formatter.TimestampFormat = "Jan _2 15:04:05.000"
+	formatter.FullTimestamp = true
+	formatter.ForceColors = true
+	llog.SetFormatter(formatter)
+	var log_level string
 
 	var rootCmd = &cobra.Command{
 		Use:   "lightest [pop|pay]",
@@ -21,7 +27,20 @@ workloads, for populating the database with accounts, making transfers, and
 checking correctness. It collects client-side metrics for latency and
 bandwidth along the way.`,
 		Version: "0.9",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if l, err := llog.ParseLevel(log_level); err != nil {
+				return err
+			} else {
+				llog.SetLevel(l)
+			}
+			return nil
+		},
 	}
+	rootCmd.PersistentFlags().StringVarP(&log_level,
+		"log-level", "v",
+		llog.InfoLevel.String(),
+		"Log level (trace, debug, info, warn, error, fatal, panic")
+
 	var popCmd = &cobra.Command{
 		Use:     "pop",
 		Aliases: []string{"populate"},
