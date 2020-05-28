@@ -11,13 +11,12 @@ done - implement pop()
 done - implement check()
 done - add total rps calculation
 done - add latency calculation min/max
-- add latency 95/99/99.9
+done - add latency 95/99/99.9
+done - add --report-interval (default 1 second) reporting
+done - add latency min/max/med/ to --report-interval
+done - add rps to --report-interval
 - make the number of workers configurable
-    https://github.com/spenczar/tdigest
 - make scylla/cassandra credentials configurable
-- add --report-interval (default 5 seconds) reporting
-- add latency min/max/avg/99/99.9 to --report-interval
-- add rps moving average to --report-interval
 - implement repair:
   * add handling for pending_transfer != transfer_id
   * add handling for client  mismatch
@@ -25,4 +24,5 @@ done - add latency calculation min/max
 - populate should generate dups
 - populate should create accounts in a predictable way, so that
   nothing is loaded back on start of pay()
+- add normal or zipfian distribution support of accounts
 - use more lightweight logging, zerolog or zap

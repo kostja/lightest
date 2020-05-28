@@ -49,6 +49,7 @@ bandwidth along the way.`,
 
 		Run: func(cmd *cobra.Command, args []string) {
 			var n, _ = cmd.Flags().GetInt("accounts")
+			StatsSetTotal(n)
 			if err := populate(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
@@ -62,6 +63,7 @@ bandwidth along the way.`,
 		Short:   "Run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
 			var n, _ = cmd.Flags().GetInt("transfers")
+			StatsSetTotal(n)
 			if err := pay(cmd, n); err != nil {
 				llog.Fatalf("%v", err)
 			}
