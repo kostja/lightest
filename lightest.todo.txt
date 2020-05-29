@@ -15,7 +15,7 @@ done - add latency 95/99/99.9
 done - add --report-interval (default 1 second) reporting
 done - add latency min/max/med/ to --report-interval
 done - add rps to --report-interval
-- make the number of workers configurable
+done - make the number of workers configurable
 - make scylla/cassandra credentials configurable
 - implement repair:
   * add handling for pending_transfer != transfer_id
@@ -25,4 +25,5 @@ done - add rps to --report-interval
 - populate should create accounts in a predictable way, so that
   nothing is loaded back on start of pay()
 - add normal or zipfian distribution support of accounts
+Other:
 - use more lightweight logging, zerolog or zap

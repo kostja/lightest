@@ -56,7 +56,8 @@ func statsWorker() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	more := true
-	for more {
+loop:
+	for {
 		var elapsed time.Duration
 		select {
 		case <-ticker.C:
@@ -79,6 +80,9 @@ func statsWorker() {
 				s.periodic.Reset()
 			}
 		case elapsed, more = <-s.queue:
+			if !more {
+				break loop
+			}
 			s.periodic.Update(elapsed)
 			s.summary.Update(elapsed)
 		}
@@ -109,10 +113,14 @@ func StatsRequestEnd(c cookie) {
 	s.queue <- time.Since(c.time)
 }
 
-func StatsReportSummaries() {
+func StatsReportSummary() {
 	// Stop background work
 	close(s.queue)
 	<-s.done
+
+	if s.summary.n_requests == 0 {
+		return
+	}
 
 	wallclocktime := time.Since(s.starttime).Seconds()
 	llog.Infof("Total time: %.3fs, %v t/sec",

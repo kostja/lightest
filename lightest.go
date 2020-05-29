@@ -4,9 +4,13 @@ import (
 	llog "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
+	"runtime"
 )
 
 func main() {
+
+	var cores = runtime.NumCPU()
+	var workers = 4 * cores
 
 	llog.SetOutput(os.Stdout)
 
@@ -49,13 +53,15 @@ bandwidth along the way.`,
 
 		Run: func(cmd *cobra.Command, args []string) {
 			var n, _ = cmd.Flags().GetInt("accounts")
+			var w, _ = cmd.Flags().GetInt("workers")
 			StatsSetTotal(n)
-			if err := populate(cmd, n); err != nil {
+			if err := populate(cmd, n, w); err != nil {
 				llog.Fatalf("%v", err)
 			}
 		},
 	}
 	popCmd.PersistentFlags().IntP("accounts", "n", 100, "Number of accounts to create")
+	popCmd.PersistentFlags().IntP("workers", "w", workers, "Number of workers, 4 * CPU if not set.")
 
 	var payCmd = &cobra.Command{
 		Use:     "pay",
@@ -63,15 +69,17 @@ bandwidth along the way.`,
 		Short:   "Run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
 			var n, _ = cmd.Flags().GetInt("transfers")
+			var w, _ = cmd.Flags().GetInt("workers")
 			StatsSetTotal(n)
-			if err := pay(cmd, n); err != nil {
+			if err := pay(cmd, n, w); err != nil {
 				llog.Fatalf("%v", err)
 			}
 		},
 	}
 	StatsInit()
 	payCmd.PersistentFlags().IntP("transfers", "n", 100, "Number of transfers to make")
+	payCmd.PersistentFlags().IntP("workers", "w", workers, "Number of transfers to make")
 	rootCmd.AddCommand(popCmd, payCmd)
 	rootCmd.Execute()
-	StatsReportSummaries()
+	StatsReportSummary()
 }

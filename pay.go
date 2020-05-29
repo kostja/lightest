@@ -193,15 +193,13 @@ func (t *Transfer) SetTransferState(
 	return nil
 }
 
-func pay(cmd *cobra.Command, n int) error {
+func pay(cmd *cobra.Command, n int, workers int) error {
 
-	var cores = runtime.NumCPU()
-	var workers = 4 * cores
 	if workers > n {
 		workers = n
 	}
 	llog.Infof("Making %d transfers using %d workers on %d cores \n",
-		n, workers, cores)
+		n, workers, runtime.NumCPU())
 
 	cluster := gocql.NewCluster("localhost")
 	cluster.Authenticator = gocql.PasswordAuthenticator{

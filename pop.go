@@ -11,14 +11,13 @@ import (
 	"time"
 )
 
-func populate(cmd *cobra.Command, n int) error {
+func populate(cmd *cobra.Command, n int, workers int) error {
 
-	var cores = runtime.NumCPU()
-	var workers = 4 * cores
 	if workers > n {
 		workers = n
 	}
-	fmt.Printf("Creating %d accounts using %d workers on %d cores \n", n, workers, cores)
+	fmt.Printf("Creating %d accounts using %d workers on %d cores \n", n, workers,
+		runtime.NumCPU())
 
 	cluster := gocql.NewCluster("localhost")
 	cluster.Authenticator = gocql.PasswordAuthenticator{
@@ -67,8 +66,8 @@ func populate(cmd *cobra.Command, n int) error {
 			bic, ban := rand.NewBicAndBan()
 			balance := rand.NewStartBalance()
 			stmt.Bind(bic, ban, balance)
-			if err = stmt.Exec(); err != nil {
-				llog.Fatalf("%+v", err)
+			for err = stmt.Exec(); err != nil; {
+				llog.Printf("%+v", err)
 			}
 			StatsRequestEnd(cookie)
 		}
