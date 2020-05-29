@@ -29,6 +29,7 @@ func populate(cmd *cobra.Command, n int, workers int) error {
 
 	llog.Infof("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
+	defer session.Close()
 	if err != nil {
 		return merry.Wrap(err)
 	}
@@ -44,6 +45,7 @@ func populate(cmd *cobra.Command, n int, workers int) error {
 	if err != nil {
 		return merry.Wrap(err)
 	}
+	defer session.Close()
 	if err = session.Query(CREATE_ACCOUNTS_TAB).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
@@ -67,10 +69,18 @@ func populate(cmd *cobra.Command, n int, workers int) error {
 			balance := rand.NewStartBalance()
 			stmt.Bind(bic, ban, balance)
 			for err = stmt.Exec(); err != nil; {
-				llog.Printf("%+v", err)
+				reqErr, isRequestErr := err.(gocql.RequestError)
+				if isRequestErr && reqErr != nil {
+					llog.Tracef("Error: %v Code: %v Message: %v",
+						reqErr.Error(), reqErr.Code(), reqErr.Message())
+					time.Sleep(time.Millisecond)
+				} else {
+					llog.Fatalf("Got fatal error: %+v", err)
+				}
 			}
 			StatsRequestEnd(cookie)
 		}
+		llog.Tracef("Worker %d done %d accounts", id, n_accounts)
 	}
 	var wg sync.WaitGroup
 
@@ -88,8 +98,6 @@ func populate(cmd *cobra.Command, n int, workers int) error {
 	}
 
 	wg.Wait()
-
-	llog.Infof("Done, total balance: %v", check(session, nil))
 
 	return nil
 }

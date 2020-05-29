@@ -215,12 +215,10 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 	if err != nil {
 		return merry.Wrap(err)
 	}
+	defer session.Close()
 	var stats PayStats
 	var rand FixedRandomSource
 	rand.Init(session)
-	sum := check(session, nil)
-
-	llog.Infof("Initial balance: %v", sum)
 
 	worker := func(client_id gocql.UUID, n_transfers int, wg *sync.WaitGroup) {
 
@@ -262,7 +260,6 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 
 	wg.Wait()
 
-	llog.Infof("Final balance: %v", check(session, sum))
 	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
 		stats.errors,
 		stats.retries,

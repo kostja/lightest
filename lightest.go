@@ -58,6 +58,8 @@ bandwidth along the way.`,
 			if err := populate(cmd, n, w); err != nil {
 				llog.Fatalf("%v", err)
 			}
+			StatsReportSummary()
+			llog.Infof("Total balance: %v", check(nil))
 		},
 	}
 	popCmd.PersistentFlags().IntP("accounts", "n", 100, "Number of accounts to create")
@@ -70,10 +72,15 @@ bandwidth along the way.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			var n, _ = cmd.Flags().GetInt("transfers")
 			var w, _ = cmd.Flags().GetInt("workers")
+			sum := check(nil)
+			llog.Infof("Initial balance: %v", sum)
+
 			StatsSetTotal(n)
 			if err := pay(cmd, n, w); err != nil {
 				llog.Fatalf("%v", err)
 			}
+			StatsReportSummary()
+			llog.Infof("Final balance: %v", check(sum))
 		},
 	}
 	StatsInit()
@@ -81,5 +88,4 @@ bandwidth along the way.`,
 	payCmd.PersistentFlags().IntP("workers", "w", workers, "Number of transfers to make")
 	rootCmd.AddCommand(popCmd, payCmd)
 	rootCmd.Execute()
-	StatsReportSummary()
 }

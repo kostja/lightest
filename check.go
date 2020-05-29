@@ -4,9 +4,25 @@ import (
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
+	"time"
 )
 
-func check(session *gocql.Session, prev *inf.Dec) *inf.Dec {
+func check(prev *inf.Dec) *inf.Dec {
+
+	cluster := gocql.NewCluster("localhost")
+	cluster.Authenticator = gocql.PasswordAuthenticator{
+		Username: "cassandra",
+		Password: "cassandra",
+	}
+	cluster.Timeout, _ = time.ParseDuration("3000s")
+	cluster.Keyspace = "lightest"
+	cluster.Consistency = gocql.One
+
+	session, err := cluster.CreateSession()
+	defer session.Close()
+	if err != nil {
+		llog.Fatalf("Failed to run the check: %v")
+	}
 
 	iter := session.Query(CHECK_BALANCE).Iter()
 	var sum *inf.Dec
