@@ -38,10 +38,16 @@ INSERT INTO transfers
 `
 
 const UPDATE_TRANSFER = `
-UPDATE transfers USING TTL 300
+UPDATE transfers USING TTL 30
   SET client_id = ?, state = ?
   WHERE transfer_id = ?
   IF client_id = ?
+`
+
+const SELECT_TRANSFER = `
+SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
+  FROM transfers
+  WHERE transfer_id = ?
 `
 
 const DELETE_TRANSFER = `

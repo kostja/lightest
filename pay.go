@@ -23,11 +23,13 @@ type PayStats struct {
 
 type Transfer struct {
 	insert         *gocql.Query
+	select_        *gocql.Query
 	update         *gocql.Query
 	delete_        *gocql.Query
 	lock_account   *gocql.Query
 	fetch_balance  *gocql.Query
 	update_balance *gocql.Query
+	payStats       *PayStats
 }
 
 type Account struct {
@@ -39,6 +41,7 @@ type Account struct {
 
 func (t *Transfer) New(session *gocql.Session) {
 	t.insert = session.Query(INSERT_TRANSFER)
+	t.select_ = session.Query(SELECT_TRANSFER)
 	t.update = session.Query(UPDATE_TRANSFER)
 	t.delete_ = session.Query(DELETE_TRANSFER)
 	t.lock_account = session.Query(LOCK_ACCOUNT)
@@ -47,8 +50,7 @@ func (t *Transfer) New(session *gocql.Session) {
 }
 
 func (t *Transfer) Make(
-	client_id gocql.UUID, accounts []Account,
-	amount *inf.Dec, stats *PayStats) error {
+	client_id gocql.UUID, accounts []Account, amount *inf.Dec) error {
 
 	type Row = map[string]interface{}
 	var row Row
@@ -108,21 +110,40 @@ func (t *Transfer) Make(
 				return merry.Wrap(err)
 			}
 			if len(row) == 0 {
-				atomic.AddUint64(&stats.no_such_account, 1)
+				atomic.AddUint64(&t.payStats.no_such_account, 1)
 				llog.Tracef("Account %v not found, ending transfer %v", account.ban, transfer_id)
 				return t.SetTransferState(client_id, nil, transfer_id, "complete")
 			}
-			// pending_transfer != null
-			// @todo: check if the transfer is orphaned and repair
+			pending_transfer := row["pending_transfer"].(gocql.UUID)
+
+			// Check if the transfer is orphaned and recover it
+			row = Row{}
+			iter := t.select_.Bind(pending_transfer).Iter()
+			nil_uuid := gocql.UUID{}
+			// Ignore possible error, we will retry
+			defer iter.Close()
+			if iter.MapScan(row) {
+				if client_id, ok := row["client_id"]; !ok || client_id == nil_uuid {
+					// The transfer has no client working on it,
+					// recover it.
+					atomic.AddUint64(&t.payStats.recoveries, 1)
+					Recover(pending_transfer)
+				} else {
+					llog.Tracef("Not recovering transfer %v worked on by client %v",
+						pending_transfer, client_id)
+				}
+			}
+
 			llog.Tracef("Restarting after sleeping %v, pending transfer %v",
-				sleepDuration, row["pending_transfer"])
-			atomic.AddUint64(&stats.retries, 1)
+				sleepDuration, pending_transfer)
+
 			time.Sleep(sleepDuration)
 			sleepDuration = sleepDuration * 2
 			if sleepDuration > maxSleepDuration {
 				sleepDuration = maxSleepDuration
 			}
 			// Restart locking
+			atomic.AddUint64(&t.payStats.retries, 1)
 			i = 0
 		} else {
 			// In Scylla, the previous row returned even if LWT is applied.
@@ -216,7 +237,7 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 		return merry.Wrap(err)
 	}
 	defer session.Close()
-	var stats PayStats
+	var payStats PayStats
 	var rand FixedRandomSource
 	rand.Init(session)
 
@@ -224,7 +245,9 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 
 		defer wg.Done()
 
-		var transfer Transfer
+		transfer := Transfer{
+			payStats: &payStats,
+		}
 		transfer.New(session)
 
 		for i := 0; i < n_transfers; i++ {
@@ -235,11 +258,11 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 			accounts[1].bic, accounts[1].ban = rand.BicAndBan(accounts[0].bic, accounts[0].ban)
 
 			cookie := StatsRequestStart()
-			err := transfer.Make(client_id, accounts, amount, &stats)
+			err := transfer.Make(client_id, accounts, amount)
 			StatsRequestEnd(cookie)
 			if err != nil {
 				llog.Errorf("%+v", err)
-				atomic.AddUint64(&stats.errors, 1)
+				atomic.AddUint64(&payStats.errors, 1)
 				return
 			}
 		}
@@ -257,14 +280,16 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 		}
 		go worker(gocql.TimeUUID(), n_transfers, &wg)
 	}
+	RecoveryStart()
 
 	wg.Wait()
+	RecoveryStop()
 
 	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
-		stats.errors,
-		stats.retries,
-		stats.recoveries,
-		stats.no_such_account)
+		payStats.errors,
+		payStats.retries,
+		payStats.recoveries,
+		payStats.no_such_account)
 
 	return nil
 }
