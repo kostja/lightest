@@ -56,31 +56,42 @@ func (c *Client) New(session *gocql.Session, payStats *PayStats) {
 	c.update_balance = session.Query(UPDATE_BALANCE)
 }
 
-func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
-	var row Row
+func (c *Client) RegisterTransfer(accounts []Account, amount *inf.Dec) (gocql.UUID, error) {
 
 	// Register a new transfer
 	transfer_id := gocql.TimeUUID()
-	row = Row{}
-	c.insert.Bind(transfer_id,
-		accounts[0].bic, accounts[0].ban,
+	c.insert.Bind(transfer_id, accounts[0].bic, accounts[0].ban,
 		accounts[1].bic, accounts[1].ban, amount)
-	if applied, err := c.insert.MapScanCAS(row); err != nil {
-		return merry.Wrap(err)
-	} else if !applied {
-		// Should never happen, transfer id is globally unique
-		return merry.New(fmt.Sprintf("Failed to create a transfer %v: a duplicate transfer exists",
-			transfer_id))
+
+	row := Row{}
+	if applied, err := c.insert.MapScanCAS(row); err != nil || !applied {
+		if !applied {
+			// Should never happen, transfer id is globally unique
+			err = merry.New(fmt.Sprintf("Failed to create a transfer %v: a duplicate transfer exists",
+				transfer_id))
+		}
+		return transfer_id, merry.Wrap(err)
 	}
+	return transfer_id, nil
+}
+
+func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
+
+	var transfer_id gocql.UUID
+	var err error
+	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
+		return err
+	}
+
 	// Change transfer state to pending and set client id
 	c.update.Bind(c.client_id, "pending", transfer_id, nil)
-	row = Row{}
-	if applied, err := c.update.MapScanCAS(row); err != nil {
+	row := Row{}
+	if applied, err := c.update.MapScanCAS(row); err != nil || !applied {
+		if !applied {
+			// Should never happen, noone can pick up our transfer but us
+			err = merry.New(fmt.Sprintf("Failed to update transfer %v", transfer_id))
+		}
 		return merry.Wrap(err)
-	} else if !applied {
-		// Should never happen, noone can pick up our transfer but us
-		return merry.New(fmt.Sprintf("Failed to update transfer %v",
-			transfer_id))
 	}
 
 	// Always lock accounts in lexicographical order to avoid livelocks
