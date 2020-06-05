@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/gocql/gocql"
-	llog "github.com/sirupsen/logrus"
 )
 
 type RecoveryQueue struct {
@@ -19,15 +18,11 @@ func recoveryWorker(session *gocql.Session, payStats *PayStats) {
 
 loop:
 	for {
-		if transfer_id, more := <-q.queue; !more {
+		transfer_id, more := <-q.queue
+		if !more {
 			break loop
-		} else {
-			llog.Infof("Recover: %v", transfer_id)
-			if err := c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
-				llog.Infof("Failed to recover transfer %v: %v", transfer_id, err)
-				continue loop
-			}
 		}
+		c.RecoverTransfer(transfer_id)
 	}
 	q.done <- true
 }

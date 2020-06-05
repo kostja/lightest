@@ -24,17 +24,18 @@ type PayStats struct {
 }
 
 type Client struct {
-	client_id      gocql.UUID
-	session        *gocql.Session
-	payStats       *PayStats
-	insert         *gocql.Query
-	select_        *gocql.Query
-	update         *gocql.Query
-	update_nil     *gocql.Query
-	delete_        *gocql.Query
-	lock_account   *gocql.Query
-	fetch_balance  *gocql.Query
-	update_balance *gocql.Query
+	client_id            gocql.UUID
+	session              *gocql.Session
+	payStats             *PayStats
+	insert               *gocql.Query
+	fetch                *gocql.Query
+	update_client        *gocql.Query
+	update_client_if_nil *gocql.Query
+	update_state         *gocql.Query
+	delete_              *gocql.Query
+	lock_account         *gocql.Query
+	fetch_balance        *gocql.Query
+	update_balance       *gocql.Query
 }
 
 type Account struct {
@@ -49,9 +50,10 @@ func (c *Client) New(session *gocql.Session, payStats *PayStats) {
 	c.session = session
 	c.payStats = payStats
 	c.insert = session.Query(INSERT_TRANSFER)
-	c.select_ = session.Query(SELECT_TRANSFER)
-	c.update = session.Query(UPDATE_TRANSFER)
-	c.update_nil = session.Query(UPDATE_TRANSFER_NIL)
+	c.fetch = session.Query(FETCH_TRANSFER)
+	c.update_client = session.Query(UPDATE_TRANSFER_CLIENT)
+	c.update_client_if_nil = session.Query(UPDATE_TRANSFER_CLIENT_IF_NIL)
+	c.update_state = session.Query(UPDATE_TRANSFER_STATE)
 	c.delete_ = session.Query(DELETE_TRANSFER)
 	c.lock_account = session.Query(LOCK_ACCOUNT)
 	c.fetch_balance = session.Query(FETCH_BALANCE)
@@ -85,18 +87,32 @@ func (c *Client) SetTransferState(
 	var cql *gocql.Query
 
 	if old_client_id == nil {
-		cql = c.update_nil
-		cql.Bind(new_client_id, state, transfer_id)
+		cql = c.update_client_if_nil
+		cql.Bind(new_client_id, transfer_id)
 	} else {
-		cql = c.update
-		cql.Bind(new_client_id, state, transfer_id, old_client_id)
+		cql = c.update_client
+		cql.Bind(new_client_id, transfer_id, old_client_id)
 	}
-	// Change transfer state to pending and set client id
+	// Change transfer - set client id
 	row := Row{}
 	if applied, err := cql.MapScanCAS(row); err != nil || (!applied && must_apply) {
 		if err == nil && !applied && must_apply {
 			// Should never happen, noone can pick up our transfer but us
-			err = merry.New(fmt.Sprintf("Failed to apply update: %v != %v",
+			err = merry.New(fmt.Sprintf("Failed to cilent_id update: %v != %v",
+				old_client_id, row["client_id"]))
+		}
+		return merry.Wrap(err)
+	}
+	if new_client_id == nil {
+		return nil
+	}
+	// Change transfer - set state. The state is reset without TTL
+	row = Row{}
+	c.update_state.Bind(state, transfer_id, new_client_id)
+	if applied, err := c.update_state.MapScanCAS(row); err != nil || (!applied && must_apply) {
+		if err == nil && !applied && must_apply {
+			// Should never happen, noone can pick up our transfer but us
+			err = merry.New(fmt.Sprintf("Failed to apply state change: %v != %v",
 				old_client_id, row["client_id"]))
 		}
 		return merry.Wrap(err)
@@ -104,7 +120,7 @@ func (c *Client) SetTransferState(
 	return nil
 }
 
-func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error {
+func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account, wait bool) error {
 
 	// Always lock accounts in lexicographical order to avoid livelocks
 	if accounts[1].bic > accounts[0].bic ||
@@ -151,7 +167,7 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error 
 
 			// Check if the transfer is orphaned and recover it
 			row = Row{}
-			iter := c.select_.Bind(pending_transfer).Iter()
+			iter := c.fetch.Bind(pending_transfer).Iter()
 			nil_uuid := gocql.UUID{}
 			// Ignore possible error, we will retry
 			defer iter.Close()
@@ -169,6 +185,11 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error 
 						pending_transfer, client_id)
 				}
 			}
+			atomic.AddUint64(&c.payStats.retries, 1)
+
+			if !wait {
+				return merry.New("Wait aborted")
+			}
 
 			llog.Tracef("Restarting after sleeping %v, pending transfer %v",
 				sleepDuration, pending_transfer)
@@ -179,7 +200,6 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error 
 				sleepDuration = maxSleepDuration
 			}
 			// Restart locking
-			atomic.AddUint64(&c.payStats.retries, 1)
 			i = 0
 		} else {
 			// In Scylla, the previous row returned even if LWT is applied.
@@ -201,23 +221,6 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error 
 	return nil
 }
 
-func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
-
-	var transfer_id gocql.UUID
-	var err error
-	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
-		return merry.Wrap(err)
-	}
-	// Change transfer state to pending and set client id
-	if err = c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
-		return merry.Wrap(err)
-	}
-	if err = c.LockAccounts(transfer_id, accounts); err != nil {
-		return merry.Wrap(err)
-	}
-	return c.CompleteLockedTransfer(transfer_id, accounts, amount)
-}
-
 func (c *Client) CompleteLockedTransfer(
 	transfer_id gocql.UUID, accounts []Account, amount *inf.Dec) error {
 
@@ -231,11 +234,11 @@ func (c *Client) CompleteLockedTransfer(
 
 	// From now on we can ignore 'applied' - the record may
 	// not be applied only if someone completed our transfer or
-	// 300 seconds have elapsed.
+	// 30 seconds have elapsed.
 	// Move transfer to 'in progress', to not attempt to transfer the money
 	// twice
-	c.update.Bind(c.client_id, "in progress", transfer_id, c.client_id)
-	if err := c.update.Exec(); err != nil {
+	c.update_state.Bind("in progress", transfer_id, c.client_id)
+	if err := c.update_state.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 
@@ -249,11 +252,72 @@ func (c *Client) CompleteLockedTransfer(
 	}
 	// Move transfer to "complete". Typically a transfer is kept
 	// for a few years, we just delete it for simplicity.
-	c.delete_.Bind(transfer_id, c.client_id, "in progress")
+	c.delete_.Bind(transfer_id, c.client_id)
 	if err := c.delete_.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 	return nil
+}
+
+func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
+
+	var transfer_id gocql.UUID
+	var err error
+	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
+		return merry.Wrap(err)
+	}
+	// Change transfer state to pending and set client id
+	if err = c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
+		return merry.Wrap(err)
+	}
+	if err = c.LockAccounts(transfer_id, accounts, true); err != nil {
+		return merry.Wrap(err)
+	}
+	return c.CompleteLockedTransfer(transfer_id, accounts, amount)
+}
+
+func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
+	llog.Infof("Recover: %v", transfer_id)
+	if err := c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
+		llog.Infof("Failed to recover transfer %v: %v", transfer_id, err)
+		return
+	}
+	row := Row{}
+	iter := c.fetch.Bind(transfer_id).Iter()
+	// Ignore possible error, we will retry
+	defer iter.Close()
+	accounts := make([]Account, 2, 2)
+	var amount *inf.Dec
+	var state string
+	if iter.MapScan(row) {
+		accounts[0].bic = row["src_bic"].(string)
+		accounts[0].ban = row["src_ban"].(string)
+		accounts[1].bic = row["dst_bic"].(string)
+		accounts[1].ban = row["dst_ban"].(string)
+		amount = row["amount"].(*inf.Dec)
+		state = row["state"].(string)
+	} else {
+		llog.Infof("Failed to recover transfer: transfer %v not found", transfer_id)
+		return
+	}
+	if state != "in progress" {
+		// We should avoid locking the transfer if state = "in
+		// progresss" since that may lead to double withdrawal
+		// on the same transfer
+		if err := c.LockAccounts(transfer_id, accounts, false); err != nil {
+			llog.Infof("Recovery failed to lock accounts: %v", err)
+			return
+		}
+	}
+	llog.Infof("Recovering transfer %v amount %v", transfer_id, amount)
+	if amount == nil {
+		// This can happen because of a timestamp tie:
+		// http://datanerds.io/post/cassandra-no-row-consistency/
+		c.delete_.Bind(transfer_id, c.client_id)
+		c.delete_.Exec()
+	} else {
+		c.CompleteLockedTransfer(transfer_id, accounts, amount)
+	}
 }
 
 func payWorker(

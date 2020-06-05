@@ -37,30 +37,39 @@ INSERT INTO transfers
   IF NOT EXISTS
 `
 
-const UPDATE_TRANSFER = `
+const UPDATE_TRANSFER_CLIENT = `
 UPDATE transfers USING TTL 30
-  SET client_id = ?, state = ?
+  SET client_id = ?
+  WHERE transfer_id = ?
+  IF client_id = ?
+`
+
+const UPDATE_TRANSFER_STATE = `
+UPDATE transfers
+  SET state = ?
   WHERE transfer_id = ?
   IF client_id = ?
 `
 
 // Because of a Cassandra bug we can't supply NULL as a parameter marker
 
-const UPDATE_TRANSFER_NIL = `
+const UPDATE_TRANSFER_CLIENT_IF_NIL = `
 UPDATE transfers USING TTL 30
-  SET client_id = ?, state = ?
+  SET client_id = ?
   WHERE transfer_id = ?
   IF client_id = NULL
 `
 
-const SELECT_TRANSFER = `
+const FETCH_TRANSFER = `
 SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
   FROM transfers
   WHERE transfer_id = ?
 `
 
 const DELETE_TRANSFER = `
-DELETE FROM transfers WHERE transfer_id = ? IF client_id = ? AND state = ?
+DELETE FROM transfers
+  WHERE transfer_id = ?
+  IF client_id = ?
 `
 
 // Condition balance column simply to get it back
