@@ -37,7 +37,7 @@ func Recover(uuid gocql.UUID) {
 }
 
 func RecoveryStart(session *gocql.Session, payStats *PayStats) {
-	q.queue = make(chan gocql.UUID, 100)
+	q.queue = make(chan gocql.UUID, 4096)
 	q.done = make(chan bool, 1)
 	go recoveryWorker(session, payStats)
 }

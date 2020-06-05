@@ -104,17 +104,7 @@ func (c *Client) SetTransferState(
 	return nil
 }
 
-func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
-
-	var transfer_id gocql.UUID
-	var err error
-	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
-		return merry.Wrap(err)
-	}
-	// Change transfer state to pending and set client id
-	if err = c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
-		return merry.Wrap(err)
-	}
+func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account) error {
 
 	// Always lock accounts in lexicographical order to avoid livelocks
 	if accounts[1].bic > accounts[0].bic ||
@@ -126,12 +116,18 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 	}
 	sleepDuration := time.Millisecond*time.Duration(rand.Intn(10)) + time.Millisecond
 	maxSleepDuration, _ := time.ParseDuration("10s")
+
 	var i = 0
 	for i < 2 {
 		account := &accounts[accounts[i].lockOrder]
 		c.lock_account.Bind(transfer_id, account.bic, account.ban, nil)
 		row := Row{}
-		if applied, err := c.lock_account.MapScanCAS(row); !applied || err != nil {
+		// If the update is not applied because we've already locked the
+		// transfer, it's a success. This is possible during recovery.
+		lockFailed := func(applied bool) bool {
+			return !applied && row["pending_transfer"] != transfer_id
+		}
+		if applied, err := c.lock_account.MapScanCAS(row); err != nil || lockFailed(applied) {
 			if i == 1 {
 				// Remove the pending transfer from the previously
 				// locked account, do not wait with locks.
@@ -160,9 +156,12 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 			// Ignore possible error, we will retry
 			defer iter.Close()
 			if iter.MapScan(row) {
-				if client_id, ok := row["client_id"]; !ok || client_id == nil_uuid {
+				if client_id, exists := row["client_id"]; !exists || client_id == nil_uuid {
 					// The transfer has no client working on it,
 					// recover it.
+					// @todo: if we already in recovery, only push
+					// into the queue if it is not full, to avoid a
+					// deadlock.
 					atomic.AddUint64(&c.payStats.recoveries, 1)
 					Recover(pending_transfer)
 				} else {
@@ -199,6 +198,29 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 			i++
 		}
 	}
+	return nil
+}
+
+func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
+
+	var transfer_id gocql.UUID
+	var err error
+	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
+		return merry.Wrap(err)
+	}
+	// Change transfer state to pending and set client id
+	if err = c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
+		return merry.Wrap(err)
+	}
+	if err = c.LockAccounts(transfer_id, accounts); err != nil {
+		return merry.Wrap(err)
+	}
+	return c.CompleteLockedTransfer(transfer_id, accounts, amount)
+}
+
+func (c *Client) CompleteLockedTransfer(
+	transfer_id gocql.UUID, accounts []Account, amount *inf.Dec) error {
+
 	if amount.Cmp(accounts[0].balance) < 0 {
 		llog.Tracef("Moving %v from %v to %v", amount, accounts[0].balance, accounts[1].balance)
 		accounts[0].balance.Sub(accounts[0].balance, amount)
@@ -206,10 +228,6 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 	} else {
 		llog.Tracef("Insufficient balance %v to withdraw %v", accounts[0].balance, amount)
 	}
-	return c.CompleteLockedTransfer(transfer_id, accounts)
-}
-
-func (c *Client) CompleteLockedTransfer(transfer_id gocql.UUID, accounts []Account) error {
 
 	// From now on we can ignore 'applied' - the record may
 	// not be applied only if someone completed our transfer or

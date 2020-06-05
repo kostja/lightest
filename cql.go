@@ -63,6 +63,7 @@ const DELETE_TRANSFER = `
 DELETE FROM transfers WHERE transfer_id = ? IF client_id = ? AND state = ?
 `
 
+// Condition balance column simply to get it back
 const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?
