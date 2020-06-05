@@ -14,15 +14,19 @@ var q RecoveryQueue
 
 func recoveryWorker(session *gocql.Session, payStats *PayStats) {
 
-	var client Client
-	client.New(session, payStats)
+	var c Client
+	c.New(session, payStats)
 
 loop:
 	for {
-		if uuid, more := <-q.queue; !more {
+		if transfer_id, more := <-q.queue; !more {
 			break loop
 		} else {
-			llog.Infof("Recover: %v", uuid)
+			llog.Infof("Recover: %v", transfer_id)
+			if err := c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
+				llog.Infof("Failed to recover transfer %v: %v", transfer_id, err)
+				continue loop
+			}
 		}
 	}
 	q.done <- true

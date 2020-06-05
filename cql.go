@@ -44,6 +44,15 @@ UPDATE transfers USING TTL 30
   IF client_id = ?
 `
 
+// Because of a Cassandra bug we can't supply NULL as a parameter marker
+
+const UPDATE_TRANSFER_NIL = `
+UPDATE transfers USING TTL 30
+  SET client_id = ?, state = ?
+  WHERE transfer_id = ?
+  IF client_id = NULL
+`
+
 const SELECT_TRANSFER = `
 SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
   FROM transfers

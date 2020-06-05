@@ -30,6 +30,7 @@ type Client struct {
 	insert         *gocql.Query
 	select_        *gocql.Query
 	update         *gocql.Query
+	update_nil     *gocql.Query
 	delete_        *gocql.Query
 	lock_account   *gocql.Query
 	fetch_balance  *gocql.Query
@@ -50,6 +51,7 @@ func (c *Client) New(session *gocql.Session, payStats *PayStats) {
 	c.insert = session.Query(INSERT_TRANSFER)
 	c.select_ = session.Query(SELECT_TRANSFER)
 	c.update = session.Query(UPDATE_TRANSFER)
+	c.update_nil = session.Query(UPDATE_TRANSFER_NIL)
 	c.delete_ = session.Query(DELETE_TRANSFER)
 	c.lock_account = session.Query(LOCK_ACCOUNT)
 	c.fetch_balance = session.Query(FETCH_BALANCE)
@@ -65,7 +67,7 @@ func (c *Client) RegisterTransfer(accounts []Account, amount *inf.Dec) (gocql.UU
 
 	row := Row{}
 	if applied, err := c.insert.MapScanCAS(row); err != nil || !applied {
-		if !applied {
+		if err == nil && !applied {
 			// Should never happen, transfer id is globally unique
 			err = merry.New(fmt.Sprintf("Failed to create a transfer %v: a duplicate transfer exists",
 				transfer_id))
@@ -75,22 +77,42 @@ func (c *Client) RegisterTransfer(accounts []Account, amount *inf.Dec) (gocql.UU
 	return transfer_id, nil
 }
 
+// Accept interfaces to allow nil client id
+func (c *Client) SetTransferState(
+	old_client_id interface{}, new_client_id interface{},
+	transfer_id gocql.UUID, state string, must_apply bool) error {
+
+	var cql *gocql.Query
+
+	if old_client_id == nil {
+		cql = c.update_nil
+		cql.Bind(new_client_id, state, transfer_id)
+	} else {
+		cql = c.update
+		cql.Bind(new_client_id, state, transfer_id, old_client_id)
+	}
+	// Change transfer state to pending and set client id
+	row := Row{}
+	if applied, err := cql.MapScanCAS(row); err != nil || (!applied && must_apply) {
+		if err == nil && !applied && must_apply {
+			// Should never happen, noone can pick up our transfer but us
+			err = merry.New(fmt.Sprintf("Failed to apply update: %v != %v",
+				old_client_id, row["client_id"]))
+		}
+		return merry.Wrap(err)
+	}
+	return nil
+}
+
 func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 
 	var transfer_id gocql.UUID
 	var err error
 	if transfer_id, err = c.RegisterTransfer(accounts, amount); err != nil {
-		return err
+		return merry.Wrap(err)
 	}
-
 	// Change transfer state to pending and set client id
-	c.update.Bind(c.client_id, "pending", transfer_id, nil)
-	row := Row{}
-	if applied, err := c.update.MapScanCAS(row); err != nil || !applied {
-		if !applied {
-			// Should never happen, noone can pick up our transfer but us
-			err = merry.New(fmt.Sprintf("Failed to update transfer %v", transfer_id))
-		}
+	if err = c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
 		return merry.Wrap(err)
 	}
 
@@ -108,7 +130,7 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 	for i < 2 {
 		account := &accounts[accounts[i].lockOrder]
 		c.lock_account.Bind(transfer_id, account.bic, account.ban, nil)
-		row = Row{}
+		row := Row{}
 		if applied, err := c.lock_account.MapScanCAS(row); !applied || err != nil {
 			if i == 1 {
 				// Remove the pending transfer from the previously
@@ -127,7 +149,7 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 			if len(row) == 0 {
 				atomic.AddUint64(&c.payStats.no_such_account, 1)
 				llog.Tracef("Account %v not found, ending transfer %v", account.ban, transfer_id)
-				return c.SetTransferState(c.client_id, nil, transfer_id, "complete")
+				return c.SetTransferState(c.client_id, nil, transfer_id, "complete", false)
 			}
 			pending_transfer := row["pending_transfer"].(gocql.UUID)
 
@@ -211,18 +233,6 @@ func (c *Client) CompleteLockedTransfer(transfer_id gocql.UUID, accounts []Accou
 	// for a few years, we just delete it for simplicity.
 	c.delete_.Bind(transfer_id, c.client_id, "in progress")
 	if err := c.delete_.Exec(); err != nil {
-		return merry.Wrap(err)
-	}
-	return nil
-}
-
-func (c *Client) SetTransferState(
-	old_client_id interface{}, new_client_id interface{},
-	transfer_id gocql.UUID, state string) error {
-
-	// Change transfer state to pending and set client id
-	c.update.Bind(new_client_id, state, transfer_id, new_client_id)
-	if err := c.update.Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 	return nil

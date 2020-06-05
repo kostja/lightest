@@ -21,7 +21,7 @@ func check(prev *inf.Dec) *inf.Dec {
 	session, err := cluster.CreateSession()
 	defer session.Close()
 	if err != nil {
-		llog.Fatalf("Failed to run the check: %v")
+		llog.Fatalf("Failed to run the check: %v", err)
 	}
 
 	iter := session.Query(CHECK_BALANCE).Iter()
