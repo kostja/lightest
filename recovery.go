@@ -12,7 +12,11 @@ type RecoveryQueue struct {
 
 var q RecoveryQueue
 
-func recoveryWorker() {
+func recoveryWorker(session *gocql.Session, payStats *PayStats) {
+
+	var client Client
+	client.New(session, payStats)
+
 loop:
 	for {
 		if uuid, more := <-q.queue; !more {
@@ -28,10 +32,10 @@ func Recover(uuid gocql.UUID) {
 	q.queue <- uuid
 }
 
-func RecoveryStart() {
+func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 	q.queue = make(chan gocql.UUID, 100)
 	q.done = make(chan bool, 1)
-	go recoveryWorker()
+	go recoveryWorker(session, payStats)
 }
 
 func RecoveryStop() {
