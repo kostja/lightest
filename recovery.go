@@ -48,7 +48,7 @@ func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 		}
 	}
 	if err := iter.Close(); err != nil {
-		llog.Infof("Failed to fetch dead transfers: %v", err)
+		llog.Errorf("Failed to fetch dead transfers: %v", err)
 	}
 	go recoveryWorker(c)
 }
