@@ -37,11 +37,19 @@ INSERT INTO transfers
   IF NOT EXISTS
 `
 
-const UPDATE_TRANSFER_CLIENT = `
+const UPDATE_TRANSFER = `
 UPDATE transfers USING TTL 30
   SET client_id = ?
   WHERE transfer_id = ?
   IF client_id = ?
+`
+
+// Because of a Cassandra/Scylla bug we can't supply NULL as a parameter marker
+const UPDATE_TRANSFER_IF_CLIENT_NULL = `
+UPDATE transfers USING TTL 30
+  SET client_id = ?
+  WHERE transfer_id = ?
+  IF client_id = NULL
 `
 
 const UPDATE_TRANSFER_STATE = `
@@ -51,13 +59,10 @@ UPDATE transfers
   IF client_id = ?
 `
 
-// Because of a Cassandra bug we can't supply NULL as a parameter marker
-
-const UPDATE_TRANSFER_CLIENT_IF_NIL = `
-UPDATE transfers USING TTL 30
-  SET client_id = ?
+const DELETE_TRANSFER = `
+DELETE FROM transfers
   WHERE transfer_id = ?
-  IF client_id = NULL
+  IF client_id = ?
 `
 
 const FETCH_TRANSFER = `
@@ -66,10 +71,14 @@ SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
   WHERE transfer_id = ?
 `
 
-const DELETE_TRANSFER = `
-DELETE FROM transfers
-  WHERE transfer_id = ?
-  IF client_id = ?
+// Cassandra/Scylla don't handle IF client_id = NUll queries
+// correctly. But NULLs are implicitly converted to mintimeuuids
+// during comparison. Use one bug to workaround another.
+const FETCH_DEAD_TRANSFERS = `
+SELECT transfer_id
+  FROM transfers
+  WHERE client_id < minTimeuuid('1979-08-12 21:35+0000')
+  ALLOW FILTERING
 `
 
 // Condition balance column simply to get it back

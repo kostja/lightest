@@ -24,18 +24,18 @@ type PayStats struct {
 }
 
 type Client struct {
-	client_id            gocql.UUID
-	session              *gocql.Session
-	payStats             *PayStats
-	insert               *gocql.Query
-	fetch                *gocql.Query
-	update_client        *gocql.Query
-	update_client_if_nil *gocql.Query
-	update_state         *gocql.Query
-	delete_              *gocql.Query
-	lock_account         *gocql.Query
-	fetch_balance        *gocql.Query
-	update_balance       *gocql.Query
+	client_id             gocql.UUID
+	session               *gocql.Session
+	payStats              *PayStats
+	insert                *gocql.Query
+	fetch                 *gocql.Query
+	update                *gocql.Query
+	update_if_client_null *gocql.Query
+	update_state          *gocql.Query
+	delete_               *gocql.Query
+	lock_account          *gocql.Query
+	fetch_balance         *gocql.Query
+	update_balance        *gocql.Query
 }
 
 type Account struct {
@@ -51,8 +51,8 @@ func (c *Client) New(session *gocql.Session, payStats *PayStats) {
 	c.payStats = payStats
 	c.insert = session.Query(INSERT_TRANSFER)
 	c.fetch = session.Query(FETCH_TRANSFER)
-	c.update_client = session.Query(UPDATE_TRANSFER_CLIENT)
-	c.update_client_if_nil = session.Query(UPDATE_TRANSFER_CLIENT_IF_NIL)
+	c.update = session.Query(UPDATE_TRANSFER)
+	c.update_if_client_null = session.Query(UPDATE_TRANSFER_IF_CLIENT_NULL)
 	c.update_state = session.Query(UPDATE_TRANSFER_STATE)
 	c.delete_ = session.Query(DELETE_TRANSFER)
 	c.lock_account = session.Query(LOCK_ACCOUNT)
@@ -87,10 +87,10 @@ func (c *Client) SetTransferState(
 	var cql *gocql.Query
 
 	if old_client_id == nil {
-		cql = c.update_client_if_nil
+		cql = c.update_if_client_null
 		cql.Bind(new_client_id, transfer_id)
 	} else {
-		cql = c.update_client
+		cql = c.update
 		cql.Bind(new_client_id, transfer_id, old_client_id)
 	}
 	// Change transfer - set client id
@@ -98,7 +98,7 @@ func (c *Client) SetTransferState(
 	if applied, err := cql.MapScanCAS(row); err != nil || (!applied && must_apply) {
 		if err == nil && !applied && must_apply {
 			// Should never happen, noone can pick up our transfer but us
-			err = merry.New(fmt.Sprintf("Failed to cilent_id update: %v != %v",
+			err = merry.New(fmt.Sprintf("Failed client_id update: %v != %v",
 				old_client_id, row["client_id"]))
 		}
 		return merry.Wrap(err)
@@ -178,7 +178,6 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account, wait b
 					// @todo: if we already in recovery, only push
 					// into the queue if it is not full, to avoid a
 					// deadlock.
-					atomic.AddUint64(&c.payStats.recoveries, 1)
 					Recover(pending_transfer)
 				} else {
 					llog.Tracef("Not recovering transfer %v worked on by client %v",
@@ -218,6 +217,20 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, accounts []Account, wait b
 			i++
 		}
 	}
+	// Move transfer to 'in progress', to not attempt to transfer
+	// 	the money twice during recovery
+	row := Row{}
+	c.update_state.Bind("in progress", transfer_id, c.client_id)
+	if applied, err := c.update_state.MapScanCAS(row); err != nil || !applied {
+		if err != nil {
+			return merry.Wrap(err)
+		}
+		return merry.New(fmt.Sprintf("Failed to change transfer %v to 'in progress', %v",
+			transfer_id,
+			fmt.Sprintf("client id mismatch: %v != %v",
+				transfer_id, c.client_id, row["client_id"])))
+		// No need to unlock: the transfer will be repaired
+	}
 	return nil
 }
 
@@ -231,16 +244,9 @@ func (c *Client) CompleteLockedTransfer(
 	} else {
 		llog.Tracef("Insufficient balance %v to withdraw %v", accounts[0].balance, amount)
 	}
-
 	// From now on we can ignore 'applied' - the record may
 	// not be applied only if someone completed our transfer or
 	// 30 seconds have elapsed.
-	// Move transfer to 'in progress', to not attempt to transfer the money
-	// twice
-	c.update_state.Bind("in progress", transfer_id, c.client_id)
-	if err := c.update_state.Exec(); err != nil {
-		return merry.Wrap(err)
-	}
 
 	c.update_balance.Bind(accounts[0].balance, accounts[0].bic, accounts[0].ban, transfer_id)
 	if err := c.update_balance.Exec(); err != nil {
@@ -277,6 +283,7 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 }
 
 func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
+	atomic.AddUint64(&c.payStats.recoveries, 1)
 	llog.Infof("Recover: %v", transfer_id)
 	if err := c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
 		llog.Infof("Failed to recover transfer %v: %v", transfer_id, err)
@@ -296,27 +303,33 @@ func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 		accounts[1].ban = row["dst_ban"].(string)
 		amount = row["amount"].(*inf.Dec)
 		state = row["state"].(string)
+
+		if amount == nil {
+			llog.Tracef("Found a transfer with nil amount")
+			cql := c.delete_.Bind(transfer_id, c.client_id)
+			// This can happen because of a timestamp tie:
+			// http://datanerds.io/post/cassandra-no-row-consistency/
+			row := Row{}
+			if applied, err := cql.MapScanCAS(row); err != nil || !applied {
+				llog.Info("Failed deleting a dead transfer %v: %v", transfer_id, err)
+			}
+			return
+		}
+		if state != "in progress" {
+			llog.Tracef("Found a transfer with no inprogress")
+			// We should avoid locking the transfer if state = "in
+			// progresss" since that may lead to double withdrawal
+			// on the same transfer
+			if err := c.LockAccounts(transfer_id, accounts, false); err != nil {
+				llog.Infof("Recovery failed to lock accounts: %v", err)
+				return
+			}
+		}
+		llog.Infof("Recovering transfer %v amount %v", transfer_id, amount)
+		c.CompleteLockedTransfer(transfer_id, accounts, amount)
 	} else {
 		llog.Infof("Failed to recover transfer: transfer %v not found", transfer_id)
 		return
-	}
-	if state != "in progress" {
-		// We should avoid locking the transfer if state = "in
-		// progresss" since that may lead to double withdrawal
-		// on the same transfer
-		if err := c.LockAccounts(transfer_id, accounts, false); err != nil {
-			llog.Infof("Recovery failed to lock accounts: %v", err)
-			return
-		}
-	}
-	llog.Infof("Recovering transfer %v amount %v", transfer_id, amount)
-	if amount == nil {
-		// This can happen because of a timestamp tie:
-		// http://datanerds.io/post/cassandra-no-row-consistency/
-		c.delete_.Bind(transfer_id, c.client_id)
-		c.delete_.Exec()
-	} else {
-		c.CompleteLockedTransfer(transfer_id, accounts, amount)
 	}
 }
 
@@ -350,7 +363,7 @@ func payWorker(
 
 func pay(cmd *cobra.Command, n int, workers int) error {
 
-	if workers > n {
+	if workers > n && n > 0 {
 		workers = n
 	}
 	llog.Infof("Making %d transfers using %d workers on %d cores \n",
@@ -380,6 +393,8 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 	transfers_per_worker := n / workers
 	remainder := n - transfers_per_worker*workers
 
+	RecoveryStart(session, &payStats)
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		n_transfers := transfers_per_worker
@@ -388,7 +403,6 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 		}
 		go payWorker(n_transfers, session, &payStats, &randSource, &wg)
 	}
-	RecoveryStart(session, &payStats)
 
 	wg.Wait()
 	RecoveryStop()
