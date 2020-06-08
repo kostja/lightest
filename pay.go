@@ -258,9 +258,15 @@ func (c *Client) CompleteLockedTransfer(
 	}
 	// Move transfer to "complete". Typically a transfer is kept
 	// for a few years, we just delete it for simplicity.
+	row := Row{}
 	c.delete_.Bind(transfer_id, c.client_id)
-	if err := c.delete_.Exec(); err != nil {
-		return merry.Wrap(err)
+	if applied, err := c.delete_.MapScanCAS(row); err != nil || !applied {
+		if err != nil {
+			return merry.Wrap(err)
+		} else {
+			return merry.New(fmt.Sprintf("Failed to delete transfer %v: %v != %v",
+				transfer_id, c.client_id, row["client_id"]))
+		}
 	}
 	return nil
 }
@@ -284,9 +290,8 @@ func (c *Client) MakeTransfer(accounts []Account, amount *inf.Dec) error {
 
 func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 	atomic.AddUint64(&c.payStats.recoveries, 1)
-	llog.Infof("Recover: %v", transfer_id)
 	if err := c.SetTransferState(nil, c.client_id, transfer_id, "pending", true); err != nil {
-		llog.Infof("Failed to recover transfer %v: %v", transfer_id, err)
+		llog.Infof("Recovery failed to set transfer %v state: %v", transfer_id, err)
 		return
 	}
 	row := Row{}
@@ -305,18 +310,17 @@ func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 		state = row["state"].(string)
 
 		if amount == nil {
-			llog.Tracef("Found a transfer with nil amount")
+			llog.Tracef("Deleting transfer %v with nil amount", transfer_id)
 			cql := c.delete_.Bind(transfer_id, c.client_id)
 			// This can happen because of a timestamp tie:
 			// http://datanerds.io/post/cassandra-no-row-consistency/
 			row := Row{}
 			if applied, err := cql.MapScanCAS(row); err != nil || !applied {
-				llog.Info("Failed deleting a dead transfer %v: %v", transfer_id, err)
+				llog.Info("Recovery failed to delete a dead transfer %v: %v", transfer_id, err)
 			}
 			return
 		}
 		if state != "in progress" {
-			llog.Tracef("Found a transfer with no inprogress")
 			// We should avoid locking the transfer if state = "in
 			// progresss" since that may lead to double withdrawal
 			// on the same transfer
@@ -328,7 +332,7 @@ func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 		llog.Infof("Recovering transfer %v amount %v", transfer_id, amount)
 		c.CompleteLockedTransfer(transfer_id, accounts, amount)
 	} else {
-		llog.Infof("Failed to recover transfer: transfer %v not found", transfer_id)
+		llog.Infof("Recovery failed, transfer %v not found", transfer_id)
 		return
 	}
 }
