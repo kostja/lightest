@@ -43,13 +43,15 @@ func populate(settings *Settings) error {
 		return merry.Wrap(err)
 	}
 	defer session.Close()
+	if err = session.Query(CREATE_SETTINGS_TAB).Exec(); err != nil {
+		return merry.Wrap(err)
+	}
 	if err = session.Query(CREATE_ACCOUNTS_TAB).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 	if err = session.Query(CREATE_TRANSFERS_TAB).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
-
 	worker := func(id int, n_accounts int, wg *sync.WaitGroup) {
 
 		defer wg.Done()

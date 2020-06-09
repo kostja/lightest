@@ -4,6 +4,13 @@ const CREATE_KS = `CREATE KEYSPACE IF NOT EXISTS lightest
 WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor' : 1 }
 AND DURABLE_WRITES=true`
 
+const CREATE_SETTINGS_TAB = `
+CREATE TABLE settings (
+     key TEXT, -- arbitrary setting name
+     ban TEXT, -- arbitrary setting value
+     PRIMARY KEY((key))
+)`
+
 const CREATE_ACCOUNTS_TAB = `
 CREATE TABLE accounts (
      bic TEXT, -- bank identifier code
