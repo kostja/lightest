@@ -5,7 +5,6 @@ import (
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"gopkg.in/inf.v0"
 	"math/rand"
 	"runtime"
@@ -372,15 +371,15 @@ func payWorker(
 	}
 }
 
-func pay(cmd *cobra.Command, n int, workers int) error {
+func pay(settings *Settings) error {
 
 	llog.Infof("Making %d transfers using %d workers on %d cores \n",
-		n, workers, runtime.NumCPU())
+		settings.count, settings.workers, runtime.NumCPU())
 
-	cluster := gocql.NewCluster("localhost")
+	cluster := gocql.NewCluster(settings.host)
 	cluster.Authenticator = gocql.PasswordAuthenticator{
-		Username: "cassandra",
-		Password: "cassandra",
+		Username: settings.user,
+		Password: settings.password,
 	}
 	cluster.Timeout, _ = time.ParseDuration("30s")
 	cluster.Keyspace = "lightest"
@@ -398,12 +397,12 @@ func pay(cmd *cobra.Command, n int, workers int) error {
 	var randSource FixedRandomSource
 	randSource.Init(session)
 
-	transfers_per_worker := n / workers
-	remainder := n - transfers_per_worker*workers
+	transfers_per_worker := settings.count / settings.workers
+	remainder := settings.count - transfers_per_worker*settings.workers
 
 	RecoveryStart(session, &payStats)
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < settings.workers; i++ {
 		wg.Add(1)
 		n_transfers := transfers_per_worker
 		if i < remainder {

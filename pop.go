@@ -5,21 +5,21 @@ import (
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"runtime"
 	"sync"
 	"time"
 )
 
-func populate(cmd *cobra.Command, n int, workers int) error {
+func populate(settings *Settings) error {
 
-	fmt.Printf("Creating %d accounts using %d workers on %d cores \n", n, workers,
+	fmt.Printf("Creating %d accounts using %d workers on %d cores \n",
+		settings.count, settings.workers,
 		runtime.NumCPU())
 
-	cluster := gocql.NewCluster("localhost")
+	cluster := gocql.NewCluster(settings.host)
 	cluster.Authenticator = gocql.PasswordAuthenticator{
-		Username: "cassandra",
-		Password: "cassandra",
+		Username: settings.user,
+		Password: settings.password,
 	}
 	cluster.Timeout, _ = time.ParseDuration("30s")
 	cluster.Consistency = gocql.One
@@ -82,11 +82,12 @@ func populate(cmd *cobra.Command, n int, workers int) error {
 	}
 	var wg sync.WaitGroup
 
-	accounts_per_worker := n / workers
-	remainder := n - accounts_per_worker*workers
+	accounts_per_worker := settings.count / settings.workers
+	remainder := settings.count - accounts_per_worker*settings.workers
 
-	llog.Infof("Creating %v accounts using %v workers", n, workers)
-	for i := 0; i < workers; i++ {
+	llog.Infof("Creating %v accounts using %v workers",
+		settings.count, settings.workers)
+	for i := 0; i < settings.workers; i++ {
 		n_accounts := accounts_per_worker
 		if i < remainder {
 			n_accounts++

@@ -7,6 +7,26 @@ import (
 	"runtime"
 )
 
+type Settings struct {
+	log_level string
+	workers   int
+	count     int
+	host      string
+	user      string
+	password  string
+}
+
+func Defaults() Settings {
+	s := Settings{}
+	s.log_level = llog.InfoLevel.String()
+	s.workers = 4 * runtime.NumCPU()
+	s.count = 100
+	s.host = "localhost"
+	s.user = "cassandra"
+	s.password = "cassandra"
+	return s
+}
+
 func main() {
 
 	llog.SetOutput(os.Stdout)
@@ -17,10 +37,7 @@ func main() {
 	formatter.FullTimestamp = true
 	formatter.ForceColors = true
 	llog.SetFormatter(formatter)
-	var log_level string
-	var host = "localhost"
-	var workers = 4 * runtime.NumCPU()
-	var count = 100
+	settings := Defaults()
 
 	var rootCmd = &cobra.Command{
 		Use:   "lightest [pop|pay]",
@@ -32,28 +49,37 @@ checking correctness. It collects client-side metrics for latency and
 bandwidth along the way.`,
 		Version: "0.9",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if l, err := llog.ParseLevel(log_level); err != nil {
+			if l, err := llog.ParseLevel(settings.log_level); err != nil {
 				return err
 			} else {
 				llog.SetLevel(l)
 			}
-			if workers > count && count > 0 {
-				workers = count
+			if settings.workers > settings.count && settings.count > 0 {
+				settings.workers = settings.count
 			}
+			StatsSetTotal(settings.count)
 			return nil
 		},
 	}
-	rootCmd.PersistentFlags().StringVarP(&log_level,
+	rootCmd.PersistentFlags().StringVarP(&settings.log_level,
 		"log-level", "v",
-		llog.InfoLevel.String(),
+		settings.log_level,
 		"Log level (trace, debug, info, warn, error, fatal, panic")
-	rootCmd.PersistentFlags().StringVarP(&host,
+	rootCmd.PersistentFlags().StringVarP(&settings.host,
 		"host", "",
-		host,
+		settings.host,
 		"Cassandra host to connect to")
-	rootCmd.PersistentFlags().IntVarP(&workers,
+	rootCmd.PersistentFlags().StringVarP(&settings.user,
+		"user", "u",
+		settings.user,
+		"Cassandra user")
+	rootCmd.PersistentFlags().StringVarP(&settings.password,
+		"password", "p",
+		settings.password,
+		"Cassandra password")
+	rootCmd.PersistentFlags().IntVarP(&settings.workers,
 		"workers", "w",
-		workers,
+		settings.workers,
 		"Number of workers, 4 * NumCPU if not set.")
 
 	var popCmd = &cobra.Command{
@@ -63,17 +89,16 @@ bandwidth along the way.`,
 		Example: "./lightest populate -n 100000000",
 
 		Run: func(cmd *cobra.Command, args []string) {
-			StatsSetTotal(count)
-			if err := populate(cmd, count, workers); err != nil {
+			if err := populate(&settings); err != nil {
 				llog.Fatalf("%v", err)
 			}
 			StatsReportSummary()
-			llog.Infof("Total balance: %v", check(nil))
+			llog.Infof("Total balance: %v", check(&settings, nil))
 		},
 	}
-	popCmd.PersistentFlags().IntVarP(&count,
+	popCmd.PersistentFlags().IntVarP(&settings.count,
 		"count", "n",
-		count,
+		settings.count,
 		"Number of accounts to create")
 
 	var payCmd = &cobra.Command{
@@ -81,21 +106,20 @@ bandwidth along the way.`,
 		Aliases: []string{"transfer"},
 		Short:   "Run the payments workload",
 		Run: func(cmd *cobra.Command, args []string) {
-			sum := check(nil)
+			sum := check(&settings, nil)
 			llog.Infof("Initial balance: %v", sum)
 
-			StatsSetTotal(count)
-			if err := pay(cmd, count, workers); err != nil {
+			if err := pay(&settings); err != nil {
 				llog.Fatalf("%v", err)
 			}
 			StatsReportSummary()
-			llog.Infof("Final balance: %v", check(sum))
+			llog.Infof("Final balance: %v", check(&settings, sum))
 		},
 	}
-	StatsInit()
-	payCmd.PersistentFlags().IntVarP(&count,
-		"count", "n", count,
+	payCmd.PersistentFlags().IntVarP(&settings.count,
+		"count", "n", settings.count,
 		"Number of transfers to make")
 	rootCmd.AddCommand(popCmd, payCmd)
+	StatsInit()
 	rootCmd.Execute()
 }

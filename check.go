@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func check(prev *inf.Dec) *inf.Dec {
+func check(settings *Settings, prev *inf.Dec) *inf.Dec {
 
-	cluster := gocql.NewCluster("localhost")
+	cluster := gocql.NewCluster(settings.host)
 	cluster.Authenticator = gocql.PasswordAuthenticator{
-		Username: "cassandra",
-		Password: "cassandra",
+		Username: settings.user,
+		Password: settings.password,
 	}
 	cluster.Timeout, _ = time.ParseDuration("3000s")
 	cluster.Keyspace = "lightest"

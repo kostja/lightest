@@ -19,12 +19,12 @@ done - make the number of workers configurable
 done - implement repair:
 done  * add handling for pending_transfer != transfer_id
 done  * add handling for client  mismatch
-- make scylla/cassandra credentials configurable
-- populate should resume until it performs exactly N writes
-- populate should generate dups
+done - make scylla/cassandra credentials configurable
 - populate should create accounts in a predictable way, so that
   nothing is loaded back on start of pay()
 - add normal or zipfian distribution support of accounts
+- populate should resume until it performs exactly N writes
+- populate should generate dups
 
 Other:
 - use more lightweight logging, zerolog or zap
