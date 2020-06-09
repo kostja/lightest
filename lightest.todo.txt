@@ -16,9 +16,9 @@ done - add --report-interval (default 1 second) reporting
 done - add latency min/max/med/ to --report-interval
 done - add rps to --report-interval
 done - make the number of workers configurable
-- implement repair:
-  * add handling for pending_transfer != transfer_id
-  * add handling for client  mismatch
+done - implement repair:
+done  * add handling for pending_transfer != transfer_id
+done  * add handling for client  mismatch
 - make scylla/cassandra credentials configurable
 - populate should resume until it performs exactly N writes
 - populate should generate dups
