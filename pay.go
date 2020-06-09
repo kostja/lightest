@@ -374,9 +374,6 @@ func payWorker(
 
 func pay(cmd *cobra.Command, n int, workers int) error {
 
-	if workers > n && n > 0 {
-		workers = n
-	}
 	llog.Infof("Making %d transfers using %d workers on %d cores \n",
 		n, workers, runtime.NumCPU())
 

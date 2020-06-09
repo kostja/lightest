@@ -13,9 +13,6 @@ import (
 
 func populate(cmd *cobra.Command, n int, workers int) error {
 
-	if workers > n {
-		workers = n
-	}
 	fmt.Printf("Creating %d accounts using %d workers on %d cores \n", n, workers,
 		runtime.NumCPU())
 
