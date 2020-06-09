@@ -5,14 +5,14 @@ WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor' : 1 }
 AND DURABLE_WRITES=true`
 
 const CREATE_SETTINGS_TAB = `
-CREATE TABLE settings (
+CREATE TABLE lightest.settings (
      key TEXT, -- arbitrary setting name
      ban TEXT, -- arbitrary setting value
      PRIMARY KEY((key))
 )`
 
 const CREATE_ACCOUNTS_TAB = `
-CREATE TABLE accounts (
+CREATE TABLE lightest.accounts (
      bic TEXT, -- bank identifier code
      ban TEXT, -- bank account number within the bank
      balance DECIMAL, -- account balance
@@ -21,7 +21,7 @@ CREATE TABLE accounts (
 )`
 
 const CREATE_TRANSFERS_TAB = `
-CREATE TABLE transfers (
+CREATE TABLE lightest.transfers (
     transfer_id UUID, -- transfers UUID
     src_bic TEXT, -- source bank identification code
     src_ban TEXT, -- source bank account number

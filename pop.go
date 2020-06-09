@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
@@ -10,36 +9,22 @@ import (
 	"time"
 )
 
-func populate(settings *Settings) error {
+func bootstrapDatabase(cluster *gocql.ClusterConfig, settings *Settings) error {
 
-	fmt.Printf("Creating %d accounts using %d workers on %d cores \n",
-		settings.count, settings.workers,
-		runtime.NumCPU())
+	llog.Infof("Establishing connection to %v", settings.host)
 
-	cluster := gocql.NewCluster(settings.host)
-	cluster.Authenticator = gocql.PasswordAuthenticator{
-		Username: settings.user,
-		Password: settings.password,
-	}
-	cluster.Timeout, _ = time.ParseDuration("30s")
-	cluster.Consistency = gocql.One
-
-	llog.Infof("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
 	if err != nil {
 		return merry.Wrap(err)
 	}
 	defer session.Close()
+
 	llog.Infof("Creating the keyspace and tables...")
-	if err = session.Query(DROP_KS).Exec(); err != nil {
+
+	if err := session.Query(DROP_KS).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
-	if err = session.Query(CREATE_KS).Exec(); err != nil {
-		return merry.Wrap(err)
-	}
-	cluster.Keyspace = "lightest"
-	session, err = cluster.CreateSession()
-	if err != nil {
+	if err := session.Query(CREATE_KS).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 	defer session.Close()
@@ -52,6 +37,30 @@ func populate(settings *Settings) error {
 	if err = session.Query(CREATE_TRANSFERS_TAB).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
+	return nil
+}
+
+func populate(settings *Settings) error {
+
+	cluster := gocql.NewCluster(settings.host)
+	cluster.Authenticator = gocql.PasswordAuthenticator{
+		Username: settings.user,
+		Password: settings.password,
+	}
+	cluster.Timeout, _ = time.ParseDuration("30s")
+	cluster.Consistency = gocql.One
+
+	if err := bootstrapDatabase(cluster, settings); err != nil {
+		return merry.Wrap(err)
+	}
+
+	cluster.Keyspace = "lightest"
+	session, err := cluster.CreateSession()
+	if err != nil {
+		return merry.Wrap(err)
+	}
+	defer session.Close()
+
 	worker := func(id int, n_accounts int, wg *sync.WaitGroup) {
 
 		defer wg.Done()
@@ -82,13 +91,16 @@ func populate(settings *Settings) error {
 		}
 		llog.Tracef("Worker %d done %d accounts", id, n_accounts)
 	}
+
+	llog.Infof("Creating %d accounts using %d workers on %d cores \n",
+		settings.count, settings.workers,
+		runtime.NumCPU())
+
 	var wg sync.WaitGroup
 
 	accounts_per_worker := settings.count / settings.workers
 	remainder := settings.count - accounts_per_worker*settings.workers
 
-	llog.Infof("Creating %v accounts using %v workers",
-		settings.count, settings.workers)
 	for i := 0; i < settings.workers; i++ {
 		n_accounts := accounts_per_worker
 		if i < remainder {
