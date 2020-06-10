@@ -66,35 +66,37 @@ func createRandomBan() string {
 
 }
 
+func create_new_bics() {
+	n_bics := rand.Intn(500)
+	accounts = make([]BicAndBans, 0, n_bics)
+	for i := 0; i < n_bics; i++ {
+		accounts = append(accounts, BicAndBans{bic: createRandomBic()})
+	}
+}
+
+func load_existing_bics(session *gocql.Session) {
+	iter := session.Query("SELECT bic, ban FROM accounts").Iter()
+	var bic, ban string
+	bics := map[string][]string{}
+	for iter.Scan(&bic, &ban) {
+		bics[bic] = append(bics[bic], ban)
+	}
+	if err := iter.Close(); err != nil {
+		llog.Fatalf("%v", err)
+	}
+	n_bics := len(bics)
+	accounts = make([]BicAndBans, 0, n_bics)
+	for k, v := range bics {
+		accounts = append(accounts, BicAndBans{bic: k, bans: v})
+	}
+}
+
 func (r *FixedRandomSource) Init(session *gocql.Session) {
 
-	create_new_bics := func() {
-		n_bics := rand.Intn(500)
-		accounts = make([]BicAndBans, 0, n_bics)
-		for i := 0; i < n_bics; i++ {
-			accounts = append(accounts, BicAndBans{bic: createRandomBic()})
-		}
-	}
-	load_existing_bics := func() {
-		iter := session.Query("SELECT bic, ban FROM accounts").Iter()
-		var bic, ban string
-		bics := map[string][]string{}
-		for iter.Scan(&bic, &ban) {
-			bics[bic] = append(bics[bic], ban)
-		}
-		if err := iter.Close(); err != nil {
-			llog.Fatalf("%v", err)
-		}
-		n_bics := len(bics)
-		accounts = make([]BicAndBans, 0, n_bics)
-		for k, v := range bics {
-			accounts = append(accounts, BicAndBans{bic: k, bans: v})
-		}
-	}
 	// Each worker gorotuine uses its own instance of FixedRandomSource,
 	// but they share the data about existing BICs and BANs.
 	if session != nil {
-		accounts_once.Do(load_existing_bics)
+		accounts_once.Do(func() { load_existing_bics(session) })
 	} else {
 		accounts_once.Do(create_new_bics)
 	}
