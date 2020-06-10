@@ -37,6 +37,10 @@ const INSERT_SETTING = `
 INSERT INTO lightest.settings (key, value) VALUES (?, ?)
 `
 
+const FETCH_SETTING = `
+SELECT value FROM lightest.settings WHER key = ?
+`
+
 const INSERT_ACCOUNT = `
 INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 `

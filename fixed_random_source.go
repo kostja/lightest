@@ -28,7 +28,9 @@ var accounts_once sync.Once
 // This data structure is not goroutine safe.
 
 type FixedRandomSource struct {
-	rand rand.Source
+	seed     int64 // Random seed. Re-use a seed to ensure predictability
+	accounts int   // The total number of accounts
+	rand     rand.Source
 }
 
 func createRandomBic() string {
@@ -66,8 +68,6 @@ func createRandomBan() string {
 
 func (r *FixedRandomSource) Init(session *gocql.Session) {
 
-	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	create_new_bics := func() {
 		n_bics := rand.Intn(500)
 		accounts = make([]BicAndBans, 0, n_bics)
@@ -98,6 +98,7 @@ func (r *FixedRandomSource) Init(session *gocql.Session) {
 	} else {
 		accounts_once.Do(create_new_bics)
 	}
+	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
 // Return a globally unique identifier

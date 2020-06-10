@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"runtime"
+	"time"
 )
 
 type Settings struct {
@@ -14,6 +15,7 @@ type Settings struct {
 	host      string
 	user      string
 	password  string
+	seed      int64
 }
 
 func Defaults() Settings {
@@ -24,6 +26,7 @@ func Defaults() Settings {
 	s.host = "localhost"
 	s.user = "cassandra"
 	s.password = "cassandra"
+	s.seed = time.Now().UnixNano()
 	return s
 }
 

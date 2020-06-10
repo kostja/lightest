@@ -45,6 +45,9 @@ func bootstrapDatabase(cluster *gocql.ClusterConfig, settings *Settings) error {
 	if err = session.Query(INSERT_SETTING).Bind("accounts", str(settings.count)).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
+	if err = session.Query(INSERT_SETTING).Bind("seed", str(settings.seed)).Exec(); err != nil {
+		return merry.Wrap(err)
+	}
 	return nil
 }
 
