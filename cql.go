@@ -7,7 +7,7 @@ AND DURABLE_WRITES=true`
 const CREATE_SETTINGS_TAB = `
 CREATE TABLE lightest.settings (
      key TEXT, -- arbitrary setting name
-     ban TEXT, -- arbitrary setting value
+     value TEXT, -- arbitrary setting value
      PRIMARY KEY((key))
 )`
 
@@ -32,6 +32,10 @@ CREATE TABLE lightest.transfers (
     client_id UUID, -- the client performing the transfer
     PRIMARY KEY (transfer_id)
 )`
+
+const INSERT_SETTING = `
+INSERT INTO lightest.settings (key, value) VALUES (?, ?)
+`
 
 const INSERT_ACCOUNT = `
 INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS

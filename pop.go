@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
@@ -35,6 +36,13 @@ func bootstrapDatabase(cluster *gocql.ClusterConfig, settings *Settings) error {
 		return merry.Wrap(err)
 	}
 	if err = session.Query(CREATE_TRANSFERS_TAB).Exec(); err != nil {
+		return merry.Wrap(err)
+	}
+	str := func(val interface{}) string {
+		b, _ := json.Marshal(val)
+		return string(b)
+	}
+	if err = session.Query(INSERT_SETTING).Bind("accounts", str(settings.count)).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
 	return nil

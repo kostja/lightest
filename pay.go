@@ -44,7 +44,7 @@ type Account struct {
 	lockOrder int
 }
 
-func (c *Client) New(session *gocql.Session, payStats *PayStats) {
+func (c *Client) Init(session *gocql.Session, payStats *PayStats) {
 	c.client_id = gocql.TimeUUID()
 	c.session = session
 	c.payStats = payStats
@@ -344,13 +344,15 @@ func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 }
 
 func payWorker(
-	n_transfers int, session *gocql.Session, payStats *PayStats,
-	randSource *FixedRandomSource, wg *sync.WaitGroup) {
+	n_transfers int, session *gocql.Session,
+	payStats *PayStats, wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	var client Client
-	client.New(session, payStats)
+	var randSource FixedRandomSource
+	client.Init(session, payStats)
+	randSource.Init(session)
 
 	for i := 0; i < n_transfers; i++ {
 
@@ -394,8 +396,6 @@ func pay(settings *Settings) error {
 
 	var wg sync.WaitGroup
 	var payStats PayStats
-	var randSource FixedRandomSource
-	randSource.Init(session)
 
 	transfers_per_worker := settings.count / settings.workers
 	remainder := settings.count - transfers_per_worker*settings.workers
@@ -408,7 +408,7 @@ func pay(settings *Settings) error {
 		if i < remainder {
 			n_transfers++
 		}
-		go payWorker(n_transfers, session, &payStats, &randSource, &wg)
+		go payWorker(n_transfers, session, &payStats, &wg)
 	}
 
 	wg.Wait()

@@ -36,7 +36,7 @@ func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 	q.done = make(chan bool, 1)
 
 	var c = new(Client)
-	c.New(session, payStats)
+	c.Init(session, payStats)
 
 	iter := session.Query(FETCH_DEAD_TRANSFERS).Iter()
 	// Ignore possible errors
