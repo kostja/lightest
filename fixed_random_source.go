@@ -5,7 +5,7 @@ import (
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
-	"math/rand"
+	mathrand "math/rand"
 	"sync"
 	"time"
 )
@@ -30,10 +30,10 @@ var accounts_once sync.Once
 type FixedRandomSource struct {
 	seed     int64 // Random seed. Re-use a seed to ensure predictability
 	accounts int   // The total number of accounts
-	rand     rand.Source
+	rand     *mathrand.Rand
 }
 
-func createRandomBic() string {
+func createRandomBic(rand *mathrand.Rand) string {
 
 	var letters = []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	var digits = []rune("0123456789")
@@ -54,7 +54,7 @@ func createRandomBic() string {
 	return string(bic)
 }
 
-func createRandomBan() string {
+func createRandomBan(rand *mathrand.Rand) string {
 
 	var digits = []rune("0123456789")
 
@@ -67,10 +67,12 @@ func createRandomBan() string {
 }
 
 func create_new_bics() {
+	var rand *mathrand.Rand
+	rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 	n_bics := rand.Intn(500)
 	accounts = make([]BicAndBans, 0, n_bics)
 	for i := 0; i < n_bics; i++ {
-		accounts = append(accounts, BicAndBans{bic: createRandomBic()})
+		accounts = append(accounts, BicAndBans{bic: createRandomBic(rand)})
 	}
 }
 
@@ -100,7 +102,7 @@ func (r *FixedRandomSource) Init(session *gocql.Session) {
 	} else {
 		accounts_once.Do(create_new_bics)
 	}
-	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	r.rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 }
 
 // Return a globally unique identifier
@@ -117,19 +119,19 @@ func (r *FixedRandomSource) NewTransferId() gocql.UUID {
 
 // Create a new BIC and BAN pair
 func (r *FixedRandomSource) NewBicAndBan() (string, string) {
-	bic := accounts[rand.Intn(len(accounts))].bic
-	ban := createRandomBan()
+	bic := accounts[r.rand.Intn(len(accounts))].bic
+	ban := createRandomBan(r.rand)
 	return bic, ban
 }
 
 // Create a new random start balance
 func (r *FixedRandomSource) NewStartBalance() *inf.Dec {
-	return inf.NewDec(rand.Int63n(100000), 0)
+	return inf.NewDec(r.rand.Int63n(100000), 0)
 }
 
 // Crate a new random transfer
 func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
-	return inf.NewDec(rand.Int63n(10000), inf.Scale(rand.Int63n(3)))
+	return inf.NewDec(r.rand.Int63n(10000), inf.Scale(r.rand.Int63n(3)))
 }
 
 // Find an existing BIC and BAN pair for transaction.
@@ -138,8 +140,8 @@ func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
 // in this case the new pair is guaranteed to be distinct.
 func (r *FixedRandomSource) BicAndBan(src ...string) (string, string) {
 	for {
-		bic_pos := rand.Intn(len(accounts))
-		ban_pos := rand.Intn(len(accounts[bic_pos].bans))
+		bic_pos := r.rand.Intn(len(accounts))
+		ban_pos := r.rand.Intn(len(accounts[bic_pos].bans))
 
 		bic, ban := accounts[bic_pos].bic, accounts[bic_pos].bans[ban_pos]
 		if len(src) < 1 || bic != src[0] || len(src) < 2 || ban != src[1] {
