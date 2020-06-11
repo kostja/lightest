@@ -7,6 +7,7 @@ import (
 	llog "github.com/sirupsen/logrus"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,6 +52,11 @@ func bootstrapDatabase(cluster *gocql.ClusterConfig, settings *Settings) error {
 	return nil
 }
 
+type PopStats struct {
+	errors     uint64
+	duplicates uint64
+}
+
 // type L struct{}
 
 // func (l L) ObserveQuery(ctx context.Context, q gocql.ObservedQuery) {
@@ -72,6 +78,7 @@ func populate(settings *Settings) error {
 	if err := bootstrapDatabase(cluster, settings); err != nil {
 		return merry.Wrap(err)
 	}
+	stats := PopStats{}
 
 	cluster.Keyspace = "lightest"
 	session, err := cluster.CreateSession()
@@ -90,24 +97,32 @@ func populate(settings *Settings) error {
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
 		llog.Tracef("Worker %d inserting %d accounts", id, n_accounts)
-		for i := 0; i < n_accounts; i++ {
+		for i := 0; i < n_accounts; {
 			cookie := StatsRequestStart()
 			bic, ban := rand.NewBicAndBan()
-			llog.Tracef("Inserting account %v:%v", bic, ban)
 			balance := rand.NewStartBalance()
+			llog.Tracef("Inserting account %v:%v - %v", bic, ban, balance)
 			stmt.Bind(bic, ban, balance)
-			for err = stmt.Exec(); err != nil; {
+			row := Row{}
+			applied := false
+			for applied, err = stmt.MapScanCAS(row); err != nil; {
+				atomic.AddUint64(&stats.errors, 1)
 				reqErr, isRequestErr := err.(gocql.RequestError)
-				if isRequestErr && reqErr != nil {
-					llog.Tracef("Error: !!!")
-					//					llog.Tracef("Error: %v Code: %v Message: %v",
-					//	reqErr.Error(), reqErr.Code(), reqErr.Message())
+				if isRequestErr && reqErr != nil ||
+					err == gocql.ErrTimeoutNoResponse {
+
+					llog.Tracef("Retrying after: %v", err)
 					time.Sleep(time.Millisecond)
 				} else {
-					llog.Fatalf("Got fatal error: %+v", err)
+					llog.Fatalf("Fatal error: %+v", err)
 				}
 			}
 			StatsRequestEnd(cookie)
+			if applied {
+				i++
+			} else {
+				atomic.AddUint64(&stats.duplicates, 1)
+			}
 		}
 		llog.Tracef("Worker %d done %d accounts", id, n_accounts)
 	}
@@ -131,6 +146,8 @@ func populate(settings *Settings) error {
 	}
 
 	wg.Wait()
+	llog.Infof("Done %v accounts, %v errors, %v duplicates",
+		settings.count, stats.errors, stats.duplicates)
 
 	return nil
 }
