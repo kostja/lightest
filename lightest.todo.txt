@@ -22,7 +22,7 @@ done  * add handling for client  mismatch
 done - make scylla/cassandra credentials configurable
 done - populate should create accounts in a predictable way, so that
        nothing is loaded back on start of pay()
-- add normal or zipfian distribution support of accounts
+done - add normal or zipfian distribution support of accounts
 done - populate should resume until it performs exactly N writes
 done - populate should generate dups
 

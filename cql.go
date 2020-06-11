@@ -77,7 +77,6 @@ const FETCH_TRANSFER = `
 SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
   FROM transfers
   WHERE transfer_id = ?
-  IF EXISTS
 `
 
 // Cassandra/Scylla don't handle IF client_id = NUll queries

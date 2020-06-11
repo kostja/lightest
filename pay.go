@@ -182,8 +182,14 @@ func (c *Client) LockAccounts(transfer_id gocql.UUID, acs []Account, wait bool) 
 			// Check if the transfer is orphaned and recover it
 			row = Row{}
 			iter := c.fetch.Bind(pending_transfer).Iter()
-			// Ignore possible error, we will retry
-			defer iter.Close()
+			closeIter := func() {
+				// Ignore possible error, we will retry
+				if err := iter.Close(); err != nil {
+					llog.Errorf("Failed to fetch transfer %v: %v",
+						transfer_id, err)
+				}
+			}
+			defer closeIter()
 			if iter.MapScan(row) {
 				if client_id, exists := row["client_id"]; !exists || client_id == nil_uuid {
 					// The transfer has no client working on it,
@@ -372,7 +378,7 @@ func (c *Client) RecoverTransfer(transfer_id gocql.UUID) {
 }
 
 func payWorker(
-	n_transfers int, session *gocql.Session,
+	n_transfers int, zipfian bool, session *gocql.Session,
 	payStats *PayStats, wg *sync.WaitGroup) {
 
 	defer wg.Done()
@@ -386,15 +392,20 @@ func payWorker(
 
 		amount := randSource.NewTransferAmount()
 		acs := make([]Account, 2, 2)
-		acs[0].bic, acs[0].ban = randSource.BicAndBan()
-		acs[1].bic, acs[1].ban = randSource.BicAndBan(acs[0].bic, acs[0].ban)
+		if zipfian {
+			acs[0].bic, acs[0].ban = randSource.HotBicAndBan()
+			acs[1].bic, acs[1].ban = randSource.HotBicAndBan(acs[0].bic, acs[0].ban)
+		} else {
+			acs[0].bic, acs[0].ban = randSource.BicAndBan()
+			acs[1].bic, acs[1].ban = randSource.BicAndBan(acs[0].bic, acs[0].ban)
+		}
 
 		cookie := StatsRequestStart()
 		err := client.MakeTransfer(acs, amount)
 		StatsRequestEnd(cookie)
 
 		if err != nil {
-			llog.Errorf("%+v", err)
+			llog.Errorf("%v", err)
 			atomic.AddUint64(&payStats.errors, 1)
 			return
 		}
@@ -436,7 +447,7 @@ func pay(settings *Settings) error {
 		if i < remainder {
 			n_transfers++
 		}
-		go payWorker(n_transfers, session, &payStats, &wg)
+		go payWorker(n_transfers, settings.zipfian, session, &payStats, &wg)
 	}
 
 	wg.Wait()

@@ -16,6 +16,7 @@ type Settings struct {
 	user      string
 	password  string
 	seed      int64
+	zipfian   bool
 }
 
 func Defaults() Settings {
@@ -27,6 +28,7 @@ func Defaults() Settings {
 	s.user = "cassandra"
 	s.password = "cassandra"
 	s.seed = time.Now().UnixNano()
+	s.zipfian = false
 	return s
 }
 
@@ -122,6 +124,9 @@ bandwidth along the way.`,
 	payCmd.PersistentFlags().IntVarP(&settings.count,
 		"count", "n", settings.count,
 		"Number of transfers to make")
+	payCmd.PersistentFlags().BoolVarP(&settings.zipfian,
+		"zipfian", "z", settings.zipfian,
+		"Use zipfian distribution for payments")
 	rootCmd.AddCommand(popCmd, payCmd)
 	StatsInit()
 	rootCmd.Execute()

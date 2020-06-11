@@ -111,7 +111,7 @@ func populate(settings *Settings) error {
 				if isRequestErr && reqErr != nil ||
 					err == gocql.ErrTimeoutNoResponse {
 
-					llog.Tracef("Retrying after: %v", err)
+					llog.Errorf("Retrying after: %v", err)
 					time.Sleep(time.Millisecond)
 				} else {
 					llog.Fatalf("Fatal error: %+v", err)
