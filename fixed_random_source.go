@@ -6,6 +6,7 @@ import (
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
+	"math"
 	mathrand "math/rand"
 	"sync"
 )
@@ -33,21 +34,26 @@ func createRandomBic(rand *mathrand.Rand) string {
 }
 
 // Generate a string which looks like a bank account number
-func createRandomBan(rand *mathrand.Rand) string {
+func createRandomBan(rand *mathrand.Rand, sample_size int) string {
 
 	var digits = []rune("0123456789")
 
 	ban := make([]rune, 14)
+	n := rand.Intn(sample_size)
 	for i, _ := range ban {
-		ban[i] = digits[rand.Intn(len(digits))]
+		next := n / 10
+		ban[i] = digits[n-next*10]
+		n = next
 	}
 	return string(ban)
 }
 
 type RandomSettings struct {
-	bics     []string
-	seed     int64
-	accounts int
+	bics                []string
+	seed                int64
+	accounts            int
+	bans_per_bic        int
+	unique_bans_per_bic int
 }
 
 var once sync.Once
@@ -55,13 +61,8 @@ var rs *RandomSettings
 
 func randomSettings(session *gocql.Session) *RandomSettings {
 
-	createNewBics := func(rs *RandomSettings) {
+	generateBics := func(rs *RandomSettings) {
 		rand := mathrand.New(mathrand.NewSource(rs.seed))
-		total_bics := 500
-		if total_bics > rs.accounts {
-			total_bics = rs.accounts
-		}
-		rs.bics = make([]string, total_bics, total_bics)
 		for i := 0; i < len(rs.bics); i++ {
 			rs.bics[i] = createRandomBic(rand)
 		}
@@ -81,7 +82,19 @@ func randomSettings(session *gocql.Session) *RandomSettings {
 			llog.Fatalf("Failed to load lightest.settings: %v", err)
 		}
 		unstr(str, &rs.seed)
-		createNewBics(rs)
+		// If accounts are few, divide random space evenly between
+		// bics and bans, otherwise create no more than 500 bics
+		bics := int(math.Sqrt(float64(rs.accounts)))
+		if bics > 500 {
+			bics = 500
+		}
+		if bics > rs.accounts {
+			bics = rs.accounts
+		}
+		rs.bics = make([]string, bics, bics)
+		generateBics(rs)
+		rs.unique_bans_per_bic = (rs.accounts + bics - 1) / bics
+		rs.bans_per_bic = int(float64(rs.unique_bans_per_bic) * 1.1)
 	}
 	once.Do(fetchSettings)
 	return rs
@@ -106,11 +119,7 @@ func (r *FixedRandomSource) Init(session *gocql.Session) {
 	// Each worker gorotuine uses its own instance of FixedRandomSource,
 	// but they share the data about existing BICs.
 	r.rs = randomSettings(session)
-	r.rand = mathrand.New(mathrand.NewSource(r.rs.seed))
-	offset := mathrand.Intn(r.rs.accounts)
-	for i := 0; i < offset; i++ {
-		_, _ = r.NewBicAndBan()
-	}
+	r.rand = mathrand.New(mathrand.NewSource(mathrand.Int63()))
 }
 
 // Return a globally unique identifier
@@ -128,12 +137,7 @@ func (r *FixedRandomSource) NewTransferId() gocql.UUID {
 // Create a new BIC and BAN pair
 func (r *FixedRandomSource) NewBicAndBan() (string, string) {
 	bic := r.rs.bics[r.rand.Intn(len(r.rs.bics))]
-	ban := createRandomBan(r.rand)
-	r.offset++
-	if r.offset > r.rs.accounts {
-		r.offset = 0
-		r.rand = mathrand.New(mathrand.NewSource(r.rs.seed))
-	}
+	ban := createRandomBan(r.rand, r.rs.bans_per_bic)
 	return bic, ban
 }
 
@@ -153,7 +157,8 @@ func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
 // in this case the new pair is guaranteed to be distinct.
 func (r *FixedRandomSource) BicAndBan(src ...string) (string, string) {
 	for {
-		bic, ban := r.NewBicAndBan()
+		bic := r.rs.bics[r.rand.Intn(len(r.rs.bics))]
+		ban := createRandomBan(r.rand, r.rs.unique_bans_per_bic)
 		if len(src) < 1 || bic != src[0] || len(src) < 2 || ban != src[1] {
 			return bic, ban
 		}

@@ -117,9 +117,9 @@ func populate(settings *Settings) error {
 					llog.Fatalf("Fatal error: %+v", err)
 				}
 			}
-			StatsRequestEnd(cookie)
 			if applied {
 				i++
+				StatsRequestEnd(cookie)
 			} else {
 				atomic.AddUint64(&stats.duplicates, 1)
 			}
