@@ -45,7 +45,7 @@ func createRandomBan(rand *mathrand.Rand) string {
 }
 
 type RandomSettings struct {
-	bics     [500]string
+	bics     []string
 	seed     int64
 	accounts int
 }
@@ -57,6 +57,11 @@ func randomSettings(session *gocql.Session) *RandomSettings {
 
 	createNewBics := func(rs *RandomSettings) {
 		rand := mathrand.New(mathrand.NewSource(rs.seed))
+		total_bics := 500
+		if total_bics > rs.accounts {
+			total_bics = rs.accounts
+		}
+		rs.bics = make([]string, total_bics, total_bics)
 		for i := 0; i < len(rs.bics); i++ {
 			rs.bics[i] = createRandomBic(rand)
 		}
