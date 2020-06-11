@@ -23,8 +23,8 @@ done - make scylla/cassandra credentials configurable
 - populate should create accounts in a predictable way, so that
   nothing is loaded back on start of pay()
 - add normal or zipfian distribution support of accounts
-- populate should resume until it performs exactly N writes
-- populate should generate dups
+done - populate should resume until it performs exactly N writes
+done - populate should generate dups
 
 Other:
 - use more lightweight logging, zerolog or zap
