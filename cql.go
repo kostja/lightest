@@ -38,7 +38,7 @@ INSERT INTO lightest.settings (key, value) VALUES (?, ?)
 `
 
 const FETCH_SETTING = `
-SELECT value FROM lightest.settings WHER key = ?
+SELECT value FROM lightest.settings WHERE key = ?
 `
 
 const INSERT_ACCOUNT = `
@@ -50,13 +50,6 @@ INSERT INTO transfers
   (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
   VALUES (?, ?, ?, ?, ?, ?, 'new')
   IF NOT EXISTS
-`
-
-const UPDATE_TRANSFER = `
-UPDATE transfers USING TTL 30
-  SET client_id = ?
-  WHERE transfer_id = ?
-  IF client_id = ?
 `
 
 // Because of a Cassandra/Scylla bug we can't supply NULL as a parameter marker
@@ -101,14 +94,22 @@ const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = ? AND balance != null
+  IF pending_transfer = NULL
+`
+
+// Condition balance column simply to get it back
+const UNLOCK_ACCOUNT = `
+UPDATE accounts
+  SET pending_transfer = ?
+  WHERE bic = ? AND ban = ?
+  IF pending_transfer = ?
 `
 
 const FETCH_BALANCE = `
 UPDATE accounts
-  SET balance = null
+  SET balance = NULL
   WHERE bic = ? AND ban = ?
-  IF balance = null
+  IF balance = NULL
 `
 
 const UPDATE_BALANCE = `

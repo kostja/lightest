@@ -2,37 +2,15 @@ package main
 
 import (
 	//	"github.com/ansel1/merry"
+	"encoding/json"
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
 	"gopkg.in/inf.v0"
 	mathrand "math/rand"
 	"sync"
-	"time"
 )
 
-type BicAndBans struct {
-	bic  string
-	bans []string
-}
-
-var accounts []BicAndBans
-var accounts_once sync.Once
-
-// Represents a random data generator for the load.
-//
-// When testing payments, randomly selects from an existing accounts,
-// which are first downloaded from the cluster.
-//
-// Has a "Hot" mode, in which is biased towards returning hot keys
-//
-// This data structure is not goroutine safe.
-
-type FixedRandomSource struct {
-	seed     int64 // Random seed. Re-use a seed to ensure predictability
-	accounts int   // The total number of accounts
-	rand     *mathrand.Rand
-}
-
+// Generate a string which looks like a real bank identifier code
 func createRandomBic(rand *mathrand.Rand) string {
 
 	var letters = []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -54,6 +32,7 @@ func createRandomBic(rand *mathrand.Rand) string {
 	return string(bic)
 }
 
+// Generate a string which looks like a bank account number
 func createRandomBan(rand *mathrand.Rand) string {
 
 	var digits = []rune("0123456789")
@@ -63,46 +42,70 @@ func createRandomBan(rand *mathrand.Rand) string {
 		ban[i] = digits[rand.Intn(len(digits))]
 	}
 	return string(ban)
-
 }
 
-func create_new_bics() {
-	var rand *mathrand.Rand
-	rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
-	n_bics := rand.Intn(500)
-	accounts = make([]BicAndBans, 0, n_bics)
-	for i := 0; i < n_bics; i++ {
-		accounts = append(accounts, BicAndBans{bic: createRandomBic(rand)})
-	}
+type RandomSettings struct {
+	bics     [500]string
+	seed     int64
+	accounts int
 }
 
-func load_existing_bics(session *gocql.Session) {
-	iter := session.Query("SELECT bic, ban FROM accounts").Iter()
-	var bic, ban string
-	bics := map[string][]string{}
-	for iter.Scan(&bic, &ban) {
-		bics[bic] = append(bics[bic], ban)
+var once sync.Once
+var rs *RandomSettings
+
+func randomSettings(session *gocql.Session) *RandomSettings {
+
+	createNewBics := func(rs *RandomSettings) {
+		rand := mathrand.New(mathrand.NewSource(rs.seed))
+		for i := 0; i < len(rs.bics); i++ {
+			rs.bics[i] = createRandomBic(rand)
+		}
 	}
-	if err := iter.Close(); err != nil {
-		llog.Fatalf("%v", err)
+	unstr := func(str string, v interface{}) {
+		b := []byte(str)
+		_ = json.Unmarshal(b, &v)
 	}
-	n_bics := len(bics)
-	accounts = make([]BicAndBans, 0, n_bics)
-	for k, v := range bics {
-		accounts = append(accounts, BicAndBans{bic: k, bans: v})
+	fetchSettings := func() {
+		rs = new(RandomSettings)
+		var str string
+		if err := session.Query(FETCH_SETTING).Bind("accounts").Scan(&str); err != nil {
+			llog.Fatalf("Failed to load lightest.settings: %v", err)
+		}
+		unstr(str, &rs.accounts)
+		if err := session.Query(FETCH_SETTING).Bind("seed").Scan(&str); err != nil {
+			llog.Fatalf("Failed to load lightest.settings: %v", err)
+		}
+		unstr(str, &rs.seed)
+		createNewBics(rs)
 	}
+	once.Do(fetchSettings)
+	return rs
+}
+
+// Represents a random data generator for the load.
+//
+// When testing payments, randomly selects from existing accounts.
+//
+// Has a "Hot" mode, in which is biased towards returning hot keys
+//
+// This data structure is not goroutine safe.
+
+type FixedRandomSource struct {
+	rs     *RandomSettings
+	offset int // Current account counter, wraps arround accounts
+	rand   *mathrand.Rand
 }
 
 func (r *FixedRandomSource) Init(session *gocql.Session) {
 
 	// Each worker gorotuine uses its own instance of FixedRandomSource,
-	// but they share the data about existing BICs and BANs.
-	if session != nil {
-		accounts_once.Do(func() { load_existing_bics(session) })
-	} else {
-		accounts_once.Do(create_new_bics)
+	// but they share the data about existing BICs.
+	r.rs = randomSettings(session)
+	r.rand = mathrand.New(mathrand.NewSource(r.rs.seed))
+	offset := mathrand.Intn(r.rs.accounts)
+	for i := 0; i < offset; i++ {
+		_, _ = r.NewBicAndBan()
 	}
-	r.rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 }
 
 // Return a globally unique identifier
@@ -119,19 +122,24 @@ func (r *FixedRandomSource) NewTransferId() gocql.UUID {
 
 // Create a new BIC and BAN pair
 func (r *FixedRandomSource) NewBicAndBan() (string, string) {
-	bic := accounts[r.rand.Intn(len(accounts))].bic
+	bic := r.rs.bics[r.rand.Intn(len(r.rs.bics))]
 	ban := createRandomBan(r.rand)
+	r.offset++
+	if r.offset > r.rs.accounts {
+		r.offset = 0
+		r.rand = mathrand.New(mathrand.NewSource(r.rs.seed))
+	}
 	return bic, ban
 }
 
 // Create a new random start balance
 func (r *FixedRandomSource) NewStartBalance() *inf.Dec {
-	return inf.NewDec(r.rand.Int63n(100000), 0)
+	return inf.NewDec(mathrand.Int63n(100000), 0)
 }
 
 // Crate a new random transfer
 func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
-	return inf.NewDec(r.rand.Int63n(10000), inf.Scale(r.rand.Int63n(3)))
+	return inf.NewDec(mathrand.Int63n(10000), inf.Scale(mathrand.Int63n(3)))
 }
 
 // Find an existing BIC and BAN pair for transaction.
@@ -140,10 +148,7 @@ func (r *FixedRandomSource) NewTransferAmount() *inf.Dec {
 // in this case the new pair is guaranteed to be distinct.
 func (r *FixedRandomSource) BicAndBan(src ...string) (string, string) {
 	for {
-		bic_pos := r.rand.Intn(len(accounts))
-		ban_pos := r.rand.Intn(len(accounts[bic_pos].bans))
-
-		bic, ban := accounts[bic_pos].bic, accounts[bic_pos].bans[ban_pos]
+		bic, ban := r.NewBicAndBan()
 		if len(src) < 1 || bic != src[0] || len(src) < 2 || ban != src[1] {
 			return bic, ban
 		}

@@ -77,7 +77,7 @@ func populate(settings *Settings) error {
 		defer wg.Done()
 
 		var rand FixedRandomSource
-		rand.Init(nil)
+		rand.Init(session)
 
 		stmt := session.Query(INSERT_ACCOUNT)
 		stmt.Consistency(gocql.One)
@@ -85,6 +85,7 @@ func populate(settings *Settings) error {
 		for i := 0; i < n_accounts; i++ {
 			cookie := StatsRequestStart()
 			bic, ban := rand.NewBicAndBan()
+			llog.Tracef("Inserting account %v:%v", bic, ban)
 			balance := rand.NewStartBalance()
 			stmt.Bind(bic, ban, balance)
 			for err = stmt.Exec(); err != nil; {
