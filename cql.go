@@ -53,18 +53,28 @@ INSERT INTO transfers
 `
 
 // Because of a Cassandra/Scylla bug we can't supply NULL as a parameter marker
-const UPDATE_TRANSFER_IF_CLIENT_NULL = `
+// Always check the row exists to not accidentally add a transfer
+const SET_TRANSFER_CLIENT = `
 UPDATE transfers USING TTL 30
   SET client_id = ?
   WHERE transfer_id = ?
-  IF client_id = NULL
+  IF state != NULL AND client_id = NULL
 `
 
+// Always check the row exists to not accidentally add a transfer
+const CLEAR_TRANSFER_CLIENT = `
+UPDATE transfers
+  SET client_id = NULL
+  WHERE transfer_id = ?
+  IF state != NULL AND client_id = ?
+`
+
+// Always check the row exists to not accidentally add a transfer
 const UPDATE_TRANSFER_STATE = `
 UPDATE transfers
   SET state = ?
   WHERE transfer_id = ?
-  IF client_id = ?
+  IF state != NULL AND client_id = ?
 `
 
 const DELETE_TRANSFER = `
@@ -96,14 +106,15 @@ const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = NULL AND balance != NULL
+  IF balance != NULL AND pending_transfer = NULL
 `
 
+// Always check the row exists in IF to not accidentally add a transfer
 const UNLOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = NULL
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = ? AND balance != NULL
+  IF balance != NULL AND pending_transfer = ?
 `
 
 const FETCH_BALANCE = `
@@ -113,11 +124,12 @@ UPDATE accounts
   IF balance = NULL
 `
 
+// Always check the row exists in IF to not accidentally add a transfer
 const UPDATE_BALANCE = `
 UPDATE accounts
   SET pending_transfer = NULL, balance = ?
   WHERE bic = ? AND ban = ?
-  IF pending_transfer = ?
+  IF balance != NULL AND pending_transfer = ?
 `
 
 const CHECK_BALANCE = `

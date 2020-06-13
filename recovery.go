@@ -3,16 +3,16 @@ package main
 import (
 	"github.com/gocql/gocql"
 	llog "github.com/sirupsen/logrus"
+	"sync"
 )
 
-type RecoveryQueue struct {
-	queue chan gocql.UUID
-	done  chan bool
-}
+func recoveryWorker(session *gocql.Session, payStats *PayStats,
+	wg *sync.WaitGroup) {
 
-var q RecoveryQueue
+	defer wg.Done()
 
-func recoveryWorker(c *Client) {
+	var c = Client{}
+	c.Init(session, payStats)
 
 loop:
 	for {
@@ -22,8 +22,34 @@ loop:
 		}
 		c.RecoverTransfer(transfer_id)
 	}
-	q.done <- true
 }
+
+type RecoveryQueue struct {
+	queue    chan gocql.UUID
+	wg       sync.WaitGroup
+	session  *gocql.Session
+	payStats *PayStats
+}
+
+func (q *RecoveryQueue) Init(session *gocql.Session, payStats *PayStats) {
+
+	q.session = session
+	q.payStats = payStats
+	// Recovery is recursive, create the channels first
+	q.queue = make(chan gocql.UUID, 4096000)
+}
+
+func (q *RecoveryQueue) StartRecoveryWorker() {
+	q.wg.Add(1)
+	go recoveryWorker(q.session, q.payStats, &q.wg)
+}
+
+func (q *RecoveryQueue) Stop() {
+	close(q.queue)
+	q.wg.Wait()
+}
+
+var q RecoveryQueue
 
 func Recover(uuid gocql.UUID) {
 	q.queue <- uuid
@@ -31,29 +57,35 @@ func Recover(uuid gocql.UUID) {
 
 func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 
-	// Recovery is recursive, create the channels first
-	q.queue = make(chan gocql.UUID, 4096)
-	q.done = make(chan bool, 1)
+	q.Init(session, payStats)
 
-	var c = new(Client)
+	// Start background fiber working on the queue to
+	// make sure we purge it even during the initial recovery
+	q.StartRecoveryWorker()
+
+	var c = Client{}
 	c.Init(session, payStats)
 
-	iter := session.Query(FETCH_DEAD_TRANSFERS).Iter()
-	// Ignore possible errors
-	if iter.NumRows() > 0 {
+	for {
+		iter := session.Query(FETCH_DEAD_TRANSFERS).Iter()
+		closeIter := func() {
+			if err := iter.Close(); err != nil {
+				llog.Errorf("Failed to fetch dead transfers: %v", err)
+			}
+		}
+		defer closeIter()
+		if iter.NumRows() == 0 {
+			break
+		}
+		// Ignore possible errors
 		llog.Infof("Found %v outstanding transfers, recovering...", iter.NumRows())
 		var transfer_id gocql.UUID
 		for iter.Scan(&transfer_id) {
 			c.RecoverTransfer(transfer_id)
 		}
 	}
-	if err := iter.Close(); err != nil {
-		llog.Errorf("Failed to fetch dead transfers: %v", err)
-	}
-	go recoveryWorker(c)
 }
 
 func RecoveryStop() {
-	close(q.queue)
-	<-q.done
+	q.Stop()
 }

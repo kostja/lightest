@@ -108,10 +108,12 @@ func populate(settings *Settings) error {
 			for applied, err = stmt.MapScanCAS(row); err != nil; {
 				atomic.AddUint64(&stats.errors, 1)
 				reqErr, isRequestErr := err.(gocql.RequestError)
-				if isRequestErr && reqErr != nil ||
-					err == gocql.ErrTimeoutNoResponse {
+				if isRequestErr && reqErr != nil {
 
-					llog.Errorf("Retrying after: %v", err)
+					llog.Errorf("Retrying after request error: %v", reqErr)
+					time.Sleep(time.Millisecond)
+				} else if err == gocql.ErrTimeoutNoResponse {
+					llog.Errorf("Retrying after timeout: %v", err)
 					time.Sleep(time.Millisecond)
 				} else {
 					llog.Fatalf("Fatal error: %+v", err)
