@@ -33,6 +33,13 @@ CREATE TABLE lightest.transfers (
     PRIMARY KEY (transfer_id)
 )`
 
+const CREATE_CHECK_TAB = `
+CREATE TABLE lightest.check (
+	name TEXT,
+	amount DECIMAL,
+	PRIMARY KEY(name)
+)`
+
 const INSERT_SETTING = `
 INSERT INTO lightest.settings (key, value) VALUES (?, ?)
 `
@@ -133,8 +140,15 @@ UPDATE accounts
 `
 
 const CHECK_BALANCE = `
-SELECT SUM(balance)
-  FROM accounts
+SELECT SUM(balance) FROM accounts
+`
+
+const PERSIST_TOTAL = `
+UPDATE lightest.check SET amount = ?  WHERE name = 'total'
+`
+
+const FETCH_TOTAL = `
+SELECT amount FROM lightest.check WHERE name = 'total'
 `
 
 const DROP_KS = `

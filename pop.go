@@ -39,6 +39,9 @@ func bootstrapDatabase(cluster *gocql.ClusterConfig, settings *Settings) error {
 	if err = session.Query(CREATE_TRANSFERS_TAB).Exec(); err != nil {
 		return merry.Wrap(err)
 	}
+	if err = session.Query(CREATE_CHECK_TAB).Exec(); err != nil {
+		return merry.Wrap(err)
+	}
 	str := func(val interface{}) string {
 		b, _ := json.Marshal(val)
 		return string(b)
