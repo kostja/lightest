@@ -57,6 +57,7 @@ func check(settings *Settings, prev *inf.Dec) *inf.Dec {
 	}
 	if persistBalance {
 		// Do not overwrite the total balance if it is already persisted.
+		llog.Infof("Persisting the total balance...")
 		if err := session.Query(PERSIST_TOTAL).Bind(sum).Exec(); err != nil {
 			llog.Fatalf("Failed to persist total balance: %v", sum)
 		}

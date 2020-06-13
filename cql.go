@@ -96,6 +96,13 @@ SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
   WHERE transfer_id = ?
 `
 
+const FETCH_TRANSFER_CLIENT = `
+UPDATE transfers
+  SET client_id = NULL
+  WHERE transfer_id = ?
+  IF state != NULL AND client_id = NULL
+`
+
 // Cassandra/Scylla don't handle IF client_id = NUll queries
 // correctly. But NULLs are implicitly converted to mintimeuuids
 // during comparison. Use one bug to workaround another.
