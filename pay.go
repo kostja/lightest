@@ -116,7 +116,6 @@ func (c *Client) SetTransferClient(transferId gocql.UUID) error {
 				err = merry.New(fmt.Sprintf("our id %v, previous id %v",
 					c.clientId, rowClientId))
 			}
-			// Should never happen, noone can pick up our transfer but us
 		}
 		return merry.Wrap(err)
 	}
@@ -130,7 +129,6 @@ func (c *Client) ClearTransferClient(transferId gocql.UUID) error {
 
 	cql := c.clearTransferClient
 	cql.Bind(transferId, c.clientId)
-	// Change transfer - set client id
 	row := Row{}
 	if applied, err := cql.MapScanCAS(row); err != nil || !applied {
 		if err == nil {
@@ -183,12 +181,15 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 
 	var i = 0
 	for i < 2 {
-		// Change transfer state to pending and set client id
-		if err := c.SetTransferClient(transferId); err != nil {
-			if !merry.Is(err, TransferNotFound) {
-				return err
+		if i == 0 {
+			// Reset client id in case it expired while we were sleeping
+			// or set it if locking the transfers for the first time
+			if err := c.SetTransferClient(transferId); err != nil {
+				if !merry.Is(err, TransferNotFound) {
+					return err
+				}
+				return nil
 			}
-			return nil
 		}
 		account := &acs[acs[i].lockOrder]
 		account.found = false
