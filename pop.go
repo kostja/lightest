@@ -107,26 +107,28 @@ func populate(settings *Settings) error {
 			llog.Tracef("Inserting account %v:%v - %v", bic, ban, balance)
 			stmt.Bind(bic, ban, balance)
 			row := Row{}
-			applied := false
-			for applied, err = stmt.MapScanCAS(row); err != nil; {
-				atomic.AddUint64(&stats.errors, 1)
-				reqErr, isRequestErr := err.(gocql.RequestError)
-				if isRequestErr && reqErr != nil {
+			for {
+				if applied, err := stmt.MapScanCAS(row); err != nil {
+					atomic.AddUint64(&stats.errors, 1)
+					reqErr, isRequestErr := err.(gocql.RequestError)
+					if isRequestErr && reqErr != nil {
 
-					llog.Errorf("Retrying after request error: %v", reqErr)
-					time.Sleep(time.Millisecond)
-				} else if err == gocql.ErrTimeoutNoResponse {
-					llog.Errorf("Retrying after timeout: %v", err)
-					time.Sleep(time.Millisecond)
+						llog.Errorf("Retrying after request error: %v", reqErr)
+						time.Sleep(time.Millisecond)
+					} else if err == gocql.ErrTimeoutNoResponse {
+						llog.Errorf("Retrying after timeout: %v", err)
+						time.Sleep(time.Millisecond)
+					} else {
+						llog.Fatalf("Fatal error: %+v", err)
+					}
+				} else if applied {
+					i++
+					StatsRequestEnd(cookie)
+					break
 				} else {
-					llog.Fatalf("Fatal error: %+v", err)
+					atomic.AddUint64(&stats.duplicates, 1)
+					break
 				}
-			}
-			if applied {
-				i++
-				StatsRequestEnd(cookie)
-			} else {
-				atomic.AddUint64(&stats.duplicates, 1)
 			}
 		}
 		llog.Tracef("Worker %d done %d accounts", id, n_accounts)

@@ -159,9 +159,11 @@ func (c *Client) FetchBalance(acc *Account) error {
 				acc.bic, acc.ban))
 		}
 		return merry.Wrap(err)
+	} else if balance, exists := row["balance"]; !exists || balance == nil {
+		return TransferNotFound.Here()
 	}
-	acc.balance = row["balance"].(*inf.Dec)
 	acc.found = true
+	acc.balance = row["balance"].(*inf.Dec)
 	return nil
 }
 
@@ -190,6 +192,7 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 		}
 		account := &acs[acs[i].lockOrder]
 		account.found = false
+		account.balance = nil
 		cql := c.lockAccount
 		cql.Bind(transferId, account.bic, account.ban)
 		row := Row{}

@@ -25,6 +25,9 @@ done - populate should create accounts in a predictable way, so that
 done - add normal or zipfian distribution support of accounts
 done - populate should resume until it performs exactly N writes
 done - populate should generate dups
+* we seem to lose all applier goroutines on errors in pay
+* pop fatal error nil
+* balance mismatch
 
 Other:
 - use more lightweight logging, zerolog or zap
