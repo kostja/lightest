@@ -100,7 +100,7 @@ const FETCH_TRANSFER_CLIENT = `
 UPDATE transfers
   SET client_id = NULL
   WHERE transfer_id = ?
-  IF state != NULL AND client_id = NULL
+  IF state = NULL AND state != NULL AND client_id = NULL
 `
 
 // Cassandra/Scylla don't handle IF client_id = NUll queries

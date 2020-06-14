@@ -217,8 +217,8 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 				account = &acs[acs[0].lockOrder]
 				cql = c.unlockAccount
 				cql.Bind(account.bic, account.ban, transferId)
-				row1 := Row{}
-				if applied1, err1 := cql.MapScanCAS(row1); err1 != nil || !applied1 {
+				row := Row{}
+				if applied, err1 := cql.MapScanCAS(row); err1 != nil || !applied {
 					if err1 == nil {
 						err1 = TransferNotFound.Here()
 					}
@@ -254,15 +254,18 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 				// There is a non-empty pending transfer.
 				// Check if the transfer we've conflicted with is orphaned
 				// and recover it, before waiting
-				row1 := Row{}
+				row = Row{}
 				c.fetchClient.Bind(pendingTransfer)
-				if _, err1 := c.fetchClient.MapScanCAS(row1); err1 != nil {
-					return err1
+				if applied, err := c.fetchClient.MapScanCAS(row); err != nil || applied {
+					if err == nil {
+						err = merry.New(fmt.Sprintf("Fetching transfer %v client has applied, though it shouldn't",
+							pendingTransfer))
+					}
+					return err
 				}
-				clientId, exists := row["client_id"].(gocql.UUID)
-				if exists && clientId == nilUuid {
-					// The transfer has no client working on it,
-					// recover it.
+				_, exists = row["state"]
+				if exists && (row["client_id"] == nil || row["client_id"].(gocql.UUID) == nilUuid) {
+					// The transfer has no client working on it,  recover it.
 					llog.Tracef("[%v] Adding %v to the recovery queue",
 						c.shortId, pendingTransfer)
 					Recover(pendingTransfer)
