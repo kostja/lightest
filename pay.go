@@ -202,9 +202,9 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 			if applied {
 				return false
 			}
-			// pending_transfer may be missing from returns (Cassandra)
-			pending_transfer, exists := row["pending_transfer"].(gocql.UUID)
-			if exists && pending_transfer == transferId {
+			// pendingTransfer may be missing from returns (Cassandra)
+			pendingTransfer, exists := row["pending_transfer"].(gocql.UUID)
+			if exists && pendingTransfer == transferId {
 				return false
 			}
 			return true
@@ -239,8 +239,8 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 				}
 			} else {
 				// Lock failed because of a conflict or account is missing.
-				pending_transfer, exists := row["pending_transfer"].(gocql.UUID)
-				if !exists || pending_transfer == nilUuid {
+				pendingTransfer, exists := row["pending_transfer"].(gocql.UUID)
+				if !exists || pendingTransfer == nilUuid {
 					atomic.AddUint64(&c.payStats.no_such_account, 1)
 					msg := fmt.Sprintf("Account %v:%v not found, ending transfer %v",
 						account.bic, account.ban, transferId)
@@ -254,16 +254,17 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 				// Check if the transfer we've conflicted with is orphaned
 				// and recover it, before waiting
 				row1 := Row{}
-				iter := c.fetchClient.Bind(pending_transfer)
-				if _, err1 := iter.MapScanCAS(row1); err1 != nil {
+				c.fetchClient.Bind(pendingTransfer)
+				if _, err1 := c.fetchClient.MapScanCAS(row1); err1 != nil {
 					return err1
 				}
-				clientId, exists := row["client_id"]
-				if !exists || clientId == nilUuid {
+				clientId, exists := row["client_id"].(gocql.UUID)
+				if exists && clientId == nilUuid {
 					// The transfer has no client working on it,
 					// recover it.
-					// deadlock.
-					Recover(pending_transfer)
+					llog.Tracef("[%v] Adding %v to the recovery queue",
+						c.shortId, pendingTransfer)
+					Recover(pendingTransfer)
 				}
 				atomic.AddUint64(&c.payStats.retries, 1)
 
