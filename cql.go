@@ -91,16 +91,15 @@ DELETE FROM transfers
 `
 
 const FETCH_TRANSFER = `
-SELECT transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state, client_id
+SELECT src_bic, src_ban, dst_bic, dst_ban, amount, state
   FROM transfers
   WHERE transfer_id = ?
 `
 
 const FETCH_TRANSFER_CLIENT = `
-UPDATE transfers
-  SET client_id = NULL
+SELECT client_id
+  FROM transfers
   WHERE transfer_id = ?
-  IF state = NULL AND state != NULL AND client_id = NULL
 `
 
 // Cassandra/Scylla don't handle IF client_id = NUll queries
@@ -132,10 +131,9 @@ UPDATE accounts
 `
 
 const FETCH_BALANCE = `
-UPDATE accounts
-  SET balance = NULL
+SELECT balance
+  FROM accounts
   WHERE bic = ? AND ban = ?
-  IF balance = NULL
 `
 
 // Always check the row exists in IF to not accidentally add a transfer
