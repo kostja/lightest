@@ -52,6 +52,7 @@ const INSERT_ACCOUNT = `
 INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 `
 
+// Client id has to be updated separately to let it expire
 const INSERT_TRANSFER = `
 INSERT INTO transfers
   (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
@@ -79,9 +80,9 @@ UPDATE transfers
 // Always check the row exists to not accidentally add a transfer
 const UPDATE_TRANSFER_STATE = `
 UPDATE transfers
-  SET state = ?
+  SET state = 'in progress'
   WHERE transfer_id = ?
-  IF state != NULL AND client_id = ?
+  IF state = 'new' AND client_id = ?
 `
 
 const DELETE_TRANSFER = `

@@ -61,7 +61,9 @@ func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 
 	// Start background fiber working on the queue to
 	// make sure we purge it even during the initial recovery
-	q.StartRecoveryWorker()
+	for i := 0; i < 8; i++ {
+		q.StartRecoveryWorker()
+	}
 
 	var c = Client{}
 	c.Init(session, payStats)
