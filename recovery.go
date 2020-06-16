@@ -6,13 +6,13 @@ import (
 	"sync"
 )
 
-func recoveryWorker(session *gocql.Session, payStats *PayStats,
+func recoveryWorker(session *gocql.Session, oracle *Oracle, payStats *PayStats,
 	wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	var c = Client{}
-	c.Init(session, payStats)
+	c.Init(session, oracle, payStats)
 
 loop:
 	for {
@@ -28,12 +28,14 @@ type RecoveryQueue struct {
 	queue    chan gocql.UUID
 	wg       sync.WaitGroup
 	session  *gocql.Session
+	oracle   *Oracle
 	payStats *PayStats
 }
 
-func (q *RecoveryQueue) Init(session *gocql.Session, payStats *PayStats) {
+func (q *RecoveryQueue) Init(session *gocql.Session, oracle *Oracle, payStats *PayStats) {
 
 	q.session = session
+	q.oracle = oracle
 	q.payStats = payStats
 	// Recovery is recursive, create the channels first
 	q.queue = make(chan gocql.UUID, 4096000)
@@ -41,7 +43,7 @@ func (q *RecoveryQueue) Init(session *gocql.Session, payStats *PayStats) {
 
 func (q *RecoveryQueue) StartRecoveryWorker() {
 	q.wg.Add(1)
-	go recoveryWorker(q.session, q.payStats, &q.wg)
+	go recoveryWorker(q.session, q.oracle, q.payStats, &q.wg)
 }
 
 func (q *RecoveryQueue) Stop() {
@@ -51,25 +53,17 @@ func (q *RecoveryQueue) Stop() {
 
 var q RecoveryQueue
 
-func Recover(uuid gocql.UUID) {
-	q.queue <- uuid
+func RecoverTransfer(transferId gocql.UUID) {
+	q.queue <- transferId
 }
 
-func RecoveryStart(session *gocql.Session, payStats *PayStats) {
-
-	q.Init(session, payStats)
-
-	// Start background fiber working on the queue to
-	// make sure we purge it even during the initial recovery
-	for i := 0; i < 8; i++ {
-		q.StartRecoveryWorker()
-	}
+func Recover() {
 
 	var c = Client{}
-	c.Init(session, payStats)
+	c.Init(q.session, q.oracle, q.payStats)
 
 	for {
-		iter := session.Query(FETCH_DEAD_TRANSFERS).Iter()
+		iter := q.session.Query(FETCH_DEAD_TRANSFERS).Iter()
 		closeIter := func() {
 			if err := iter.Close(); err != nil {
 				llog.Errorf("Failed to fetch dead transfers: %v", err)
@@ -88,6 +82,20 @@ func RecoveryStart(session *gocql.Session, payStats *PayStats) {
 	}
 }
 
+func RecoveryStart(session *gocql.Session, oracle *Oracle, payStats *PayStats) {
+
+	q.Init(session, oracle, payStats)
+
+	// Start background fiber working on the queue to
+	// make sure we purge it even during the initial recovery
+	for i := 0; i < 8; i++ {
+		q.StartRecoveryWorker()
+	}
+
+	Recover()
+}
+
 func RecoveryStop() {
+	Recover()
 	q.Stop()
 }

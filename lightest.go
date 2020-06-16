@@ -17,6 +17,7 @@ type Settings struct {
 	password  string
 	seed      int64
 	zipfian   bool
+	oracle    bool
 }
 
 func Defaults() Settings {
@@ -29,6 +30,7 @@ func Defaults() Settings {
 	s.password = "cassandra"
 	s.seed = time.Now().UnixNano()
 	s.zipfian = false
+	s.oracle = false
 	return s
 }
 
@@ -127,6 +129,9 @@ bandwidth along the way.`,
 	payCmd.PersistentFlags().BoolVarP(&settings.zipfian,
 		"zipfian", "z", settings.zipfian,
 		"Use zipfian distribution for payments")
+	payCmd.PersistentFlags().BoolVarP(&settings.oracle,
+		"oracle", "o", settings.oracle,
+		"Check all payments against the built-in oracle.")
 	rootCmd.AddCommand(popCmd, payCmd)
 	StatsInit()
 	rootCmd.Execute()

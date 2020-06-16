@@ -17,6 +17,7 @@ CREATE TABLE lightest.accounts (
      ban TEXT, -- bank account number within the bank
      balance DECIMAL, -- account balance
      pending_transfer UUID, -- will be used later
+	 pending_amount DECIMAL, -- will be used later
      PRIMARY KEY((bic, ban))
 )`
 
@@ -28,7 +29,6 @@ CREATE TABLE lightest.transfers (
     dst_bic TEXT, -- destination bank identification code
     dst_ban TEXT, -- destination bank account number
     amount DECIMAL, -- transfer amount
-    state TEXT, -- ‘pending’, ‘in progress’, ‘complete’
     client_id UUID, -- the client performing the transfer
     PRIMARY KEY (transfer_id)
 )`
@@ -55,8 +55,8 @@ INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 // Client id has to be updated separately to let it expire
 const INSERT_TRANSFER = `
 INSERT INTO transfers
-  (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
-  VALUES (?, ?, ?, ?, ?, ?, 'new')
+  (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount)
+  VALUES (?, ?, ?, ?, ?, ?)
   IF NOT EXISTS
 `
 
@@ -66,7 +66,7 @@ const SET_TRANSFER_CLIENT = `
 UPDATE transfers USING TTL 30
   SET client_id = ?
   WHERE transfer_id = ?
-  IF state != NULL AND client_id = NULL
+  IF amount != NULL AND client_id = NULL
 `
 
 // Always check the row exists to not accidentally add a transfer
@@ -74,15 +74,7 @@ const CLEAR_TRANSFER_CLIENT = `
 UPDATE transfers
   SET client_id = NULL
   WHERE transfer_id = ?
-  IF state != NULL AND client_id = ?
-`
-
-// Always check the row exists to not accidentally add a transfer
-const UPDATE_TRANSFER_STATE = `
-UPDATE transfers
-  SET state = 'in progress'
-  WHERE transfer_id = ?
-  IF state = 'new' AND client_id = ?
+  IF amount != NULL AND client_id = ?
 `
 
 const DELETE_TRANSFER = `
@@ -92,7 +84,7 @@ DELETE FROM transfers
 `
 
 const FETCH_TRANSFER = `
-SELECT src_bic, src_ban, dst_bic, dst_ban, amount, state
+SELECT src_bic, src_ban, dst_bic, dst_ban, amount
   FROM transfers
   WHERE transfer_id = ?
 `
@@ -106,10 +98,10 @@ SELECT client_id
 // Cassandra/Scylla don't handle IF client_id = NUll queries
 // correctly. But NULLs are implicitly converted to mintimeuuids
 // during comparison. Use one bug to workaround another.
+// WHERE client_id < minTimeuuid('1979-08-12 21:35+0000')
 const FETCH_DEAD_TRANSFERS = `
 SELECT transfer_id
   FROM transfers
-  WHERE client_id < minTimeuuid('1979-08-12 21:35+0000')
   ALLOW FILTERING
 `
 
@@ -118,15 +110,15 @@ SELECT transfer_id
 // 2) To get it back (Scylla only)
 const LOCK_ACCOUNT = `
 UPDATE accounts
-  SET pending_transfer = ?
+  SET pending_transfer = ?, pending_amount = ?
   WHERE bic = ? AND ban = ?
-  IF balance != NULL AND pending_transfer = NULL
+  IF balance != NULL AND pending_transfer = NULL and pending_amount = NULL
 `
 
 // Always check the row exists in IF to not accidentally add a transfer
 const UNLOCK_ACCOUNT = `
 UPDATE accounts
-  SET pending_transfer = NULL
+  SET pending_transfer = NULL, pending_amount = NULL
   WHERE bic = ? AND ban = ?
   IF balance != NULL AND pending_transfer = ?
 `
@@ -140,9 +132,9 @@ SELECT balance
 // Always check the row exists in IF to not accidentally add a transfer
 const UPDATE_BALANCE = `
 UPDATE accounts
-  SET pending_transfer = NULL, balance = ?
+  SET pending_amount = NULL, balance = ?
   WHERE bic = ? AND ban = ?
-  IF balance != NULL AND pending_transfer = ?
+  IF balance != NULL AND pending_amount = ? AND pending_transfer = ?
 `
 
 const CHECK_BALANCE = `

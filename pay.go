@@ -18,10 +18,11 @@ type Row = map[string]interface{}
 var nilUuid gocql.UUID
 
 type PayStats struct {
-	errors          uint64
-	no_such_account uint64
-	retries         uint64
-	recoveries      uint64
+	errors             uint64
+	no_such_account    uint64
+	insufficient_funds uint64
+	retries            uint64
+	recoveries         uint64
 }
 
 var nClients uint64
@@ -30,6 +31,7 @@ type Client struct {
 	shortId             uint64     // For logging
 	clientId            gocql.UUID // For locking
 	session             *gocql.Session
+	oracle              *Oracle
 	payStats            *PayStats
 	insert              *gocql.Query
 	fetch               *gocql.Query
@@ -37,7 +39,6 @@ type Client struct {
 	update              *gocql.Query
 	setTransferClient   *gocql.Query
 	clearTransferClient *gocql.Query
-	updateState         *gocql.Query
 	delete_             *gocql.Query
 	lockAccount         *gocql.Query
 	unlockAccount       *gocql.Query
@@ -49,11 +50,12 @@ type Account struct {
 	bic       string
 	ban       string
 	balance   *inf.Dec
+	amount    *inf.Dec
 	lockOrder int
 	found     bool
 }
 
-func InitAccounts(acs []Account) {
+func InitAccounts(acs []Account, amount *inf.Dec) {
 	// Always lock accounts in lexicographical order to avoid livelocks
 	if acs[1].bic > acs[0].bic ||
 		acs[1].bic == acs[0].bic &&
@@ -62,13 +64,16 @@ func InitAccounts(acs []Account) {
 	} else {
 		acs[0].lockOrder = 1
 	}
+	acs[0].amount = new(inf.Dec).Neg(amount)
+	acs[1].amount = amount
 }
 
-func (c *Client) Init(session *gocql.Session, payStats *PayStats) {
+func (c *Client) Init(session *gocql.Session, oracle *Oracle, payStats *PayStats) {
 	c.clientId = gocql.TimeUUID()
 	c.shortId = atomic.AddUint64(&nClients, 1)
 	llog.Tracef("[%v] Assigning client id %v", c.shortId, c.clientId)
 	c.session = session
+	c.oracle = oracle
 	c.payStats = payStats
 	c.insert = session.Query(INSERT_TRANSFER)
 	c.fetch = session.Query(FETCH_TRANSFER)
@@ -79,7 +84,6 @@ func (c *Client) Init(session *gocql.Session, payStats *PayStats) {
 	c.fetchBalance.SerialConsistency(gocql.Serial)
 	c.setTransferClient = session.Query(SET_TRANSFER_CLIENT)
 	c.clearTransferClient = session.Query(CLEAR_TRANSFER_CLIENT)
-	c.updateState = session.Query(UPDATE_TRANSFER_STATE)
 	c.delete_ = session.Query(DELETE_TRANSFER)
 	c.lockAccount = session.Query(LOCK_ACCOUNT)
 	c.unlockAccount = session.Query(UNLOCK_ACCOUNT)
@@ -88,22 +92,20 @@ func (c *Client) Init(session *gocql.Session, payStats *PayStats) {
 
 func (c *Client) RegisterTransfer(acs []Account, amount *inf.Dec) (gocql.UUID, error) {
 
-	// Register a new transfer
 	transferId := gocql.TimeUUID()
+	llog.Tracef("[%v] Registering transfer %v from %v:%v to %v:%v - %v",
+		c.shortId, transferId, acs[0].bic, acs[0].ban, acs[1].bic, acs[1].ban, amount)
+	// Register a new transfer
 	cql := c.insert
 	cql.Bind(transferId, acs[0].bic, acs[0].ban, acs[1].bic, acs[1].ban, amount)
-
 	row := Row{}
 	if applied, err := cql.MapScanCAS(row); err != nil || !applied {
 		if err == nil && !applied {
 			// Should never happen, transfer id is globally unique
-			err = merry.New(fmt.Sprintf("Failed to create a transfer %v: a duplicate transfer exists",
-				transferId))
+			llog.Fatalf("Failed to create a transfer %v: a duplicate transfer exists", transferId)
 		}
 		return transferId, merry.Wrap(err)
 	}
-	llog.Tracef("[%v] Registering transfer %v from %v:%v to %v:%v - %v",
-		c.shortId, transferId, acs[0].bic, acs[0].ban, acs[1].bic, acs[1].ban, amount)
 	return transferId, c.SetTransferClient(transferId)
 }
 
@@ -158,21 +160,6 @@ func (c *Client) ClearTransferClient(transferId gocql.UUID) {
 	}
 }
 
-func (c *Client) SetTransferState(transferId gocql.UUID) error {
-	row := Row{}
-	cql := c.updateState
-	cql.Bind(transferId, c.clientId)
-
-	if applied, err := cql.MapScanCAS(row); err != nil || !applied {
-		if err != nil {
-			return merry.Wrap(err)
-		}
-		return merry.New(fmt.Sprintf("Failed to change transfer %v to 'in progress', row client id is %v",
-			transferId, row["client_id"]))
-	}
-	return nil
-}
-
 func (c *Client) FetchBalance(acc *Account) error {
 	cql := c.fetchBalance
 	cql.Bind(acc.bic, acc.ban)
@@ -183,7 +170,11 @@ func (c *Client) FetchBalance(acc *Account) error {
 	return nil
 }
 
-func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) error {
+func (c *Client) UnlockAccount(transferId gocql.UUID, account *Account) error {
+	return c.unlockAccount.Bind(account.bic, account.ban, transferId).Exec()
+}
+
+func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, amount *inf.Dec, wait bool) error {
 
 	llog.Tracef("[%v] Locking %v:%v and %v:%v", c.shortId, acs[0].bic, acs[0].ban, acs[1].bic, acs[1].ban)
 	sleepDuration := time.Millisecond*time.Duration(rand.Intn(10)) + time.Millisecond
@@ -193,7 +184,7 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 	for i < 2 {
 		account := &acs[acs[i].lockOrder]
 		cql := c.lockAccount
-		cql.Bind(transferId, account.bic, account.ban)
+		cql.Bind(transferId, account.amount, account.bic, account.ban)
 		row := Row{}
 		// If the update is not applied because we've already locked the
 		// transfer, it's a success. This is possible during recovery.
@@ -212,17 +203,7 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 			// Remove the pending transfer from the previously
 			// locked account, do not wait with locks.
 			if i == 1 {
-				prevAccount := &acs[acs[0].lockOrder]
-				cql = c.unlockAccount
-				cql.Bind(prevAccount.bic, prevAccount.ban, transferId)
-				row := Row{}
-				if applied1, err1 := cql.MapScanCAS(row); err1 != nil || !applied1 {
-					if err1 == nil {
-						msg := fmt.Sprintf("[%v] Failed to unlock previous account, its pending transfer is %v",
-							c.shortId, row["pending_transfer"])
-						err1 = merry.New(msg)
-						llog.Fatalf(msg)
-					}
+				if err1 := c.UnlockAccount(transferId, &acs[acs[0].lockOrder]); err1 != nil {
 					return merry.WithCause(err1, err)
 				}
 			}
@@ -264,7 +245,7 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 					// The transfer has no client working on it, recover it.
 					llog.Tracef("[%v] Adding %v to the recovery queue",
 						c.shortId, pendingTransfer)
-					Recover(pendingTransfer)
+					RecoverTransfer(pendingTransfer)
 				}
 				atomic.AddUint64(&c.payStats.retries, 1)
 
@@ -307,46 +288,71 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 	}
 	// Move transfer to 'in progress', to not attempt to transfer
 	// 	the money twice during recovery
-	return c.SetTransferState(transferId)
+	return nil
 }
 
-func (c *Client) CompleteLockedTransfer(
+func (c *Client) CompleteTransfer(
 	transferId gocql.UUID, acs []Account, amount *inf.Dec) error {
 
-	llog.Tracef("[%v] Completing transfer %v amount %v", c.shortId, transferId, amount)
+	llog.Tracef("[%v] Completing transfer %v amount %v", c.shortId,
+		transferId, amount)
 
-	if !acs[0].found || !acs[1].found {
-		atomic.AddUint64(&c.payStats.no_such_account, 1)
-		return c.DeleteTransfer(transferId)
+	if c.oracle != nil {
+		c.oracle.MakeTransfer(transferId, acs, amount)
 	}
 
-	if amount.Cmp(acs[0].balance) < 0 {
+	if acs[0].found && acs[1].found &&
+		amount.Cmp(acs[0].balance) <= 0 {
+
 		llog.Tracef("[%v] Moving %v from %v:%v (%v) to %v:%v (%v)",
 			c.shortId, amount,
 			acs[0].bic, acs[0].ban, acs[0].balance,
 			acs[1].bic, acs[1].ban, acs[1].balance)
 		acs[0].balance.Sub(acs[0].balance, amount)
 		acs[1].balance.Add(acs[1].balance, amount)
+		// From now on we can ignore 'applied' - the record may
+		// not be applied only if someone completed our transfer or
+		// 30 seconds have elapsed.
+		cql := c.updateBalance
+		cql.Bind(acs[0].balance, acs[0].bic, acs[0].ban, acs[0].amount, transferId)
+		if err := cql.Exec(); err != nil {
+			llog.Tracef("[%v] Failed to set %v:%v to %v",
+				c.shortId, acs[0].bic, acs[0].ban, acs[0].balance)
+			return merry.Wrap(err)
+		}
+		cql.Bind(acs[1].balance, acs[1].bic, acs[1].ban, acs[1].amount, transferId)
+		if err := cql.Exec(); err != nil {
+			llog.Tracef("[%v] Failed to set %v:%v to %v",
+				c.shortId, acs[1].bic, acs[1].ban, acs[1].balance)
+			return merry.Wrap(err)
+		}
+		if err := c.UnlockAccount(transferId, &acs[0]); err != nil {
+			return err
+		}
+		if err := c.UnlockAccount(transferId, &acs[1]); err != nil {
+			return err
+		}
+	} else if !acs[0].found || !acs[1].found {
+		llog.Tracef("[%v] Not found when moving %v from %v:%v (%v) to %v:%v (%v)",
+			c.shortId, amount,
+			acs[0].bic, acs[0].ban, acs[0].balance,
+			acs[1].bic, acs[1].ban, acs[1].balance)
+
+		atomic.AddUint64(&c.payStats.no_such_account, 1)
 	} else {
-		llog.Tracef("[%v] Insufficient balance %v on %v:%v to withdraw %v",
-			c.shortId, acs[0].balance, acs[0].bic, acs[0].ban, amount)
+		llog.Tracef("[%v] Insufficient funds when moving %v from %v:%v (%v) to %v:%v (%v)",
+			c.shortId, amount,
+			acs[0].bic, acs[0].ban, acs[0].balance,
+			acs[1].bic, acs[1].ban, acs[1].balance)
+		if err := c.UnlockAccount(transferId, &acs[0]); err != nil {
+			return err
+		}
+		if err := c.UnlockAccount(transferId, &acs[1]); err != nil {
+			return err
+		}
+		atomic.AddUint64(&c.payStats.insufficient_funds, 1)
 	}
-	// From now on we can ignore 'applied' - the record may
-	// not be applied only if someone completed our transfer or
-	// 30 seconds have elapsed.
-	cql := c.updateBalance
-	cql.Bind(acs[0].balance, acs[0].bic, acs[0].ban, transferId)
-	if err := cql.Exec(); err != nil {
-		llog.Tracef("[%v] Failed to set %v:%v to %v",
-			c.shortId, acs[0].bic, acs[0].ban, acs[0].balance)
-		return merry.Wrap(err)
-	}
-	cql.Bind(acs[1].balance, acs[1].bic, acs[1].ban, transferId)
-	if err := cql.Exec(); err != nil {
-		llog.Tracef("[%v] Failed to set %v:%v to %v",
-			c.shortId, acs[1].bic, acs[1].ban, acs[1].balance)
-		return merry.Wrap(err)
-	}
+
 	return c.DeleteTransfer(transferId)
 }
 
@@ -379,10 +385,10 @@ func (c *Client) MakeTransfer(acs []Account, amount *inf.Dec) error {
 	if transferId, err = c.RegisterTransfer(acs, amount); err != nil {
 		return merry.Wrap(err)
 	}
-	if err = c.LockAccounts(transferId, acs, true); err != nil {
+	if err = c.LockAccounts(transferId, acs, amount, true); err != nil {
 		return merry.Wrap(err)
 	}
-	return c.CompleteLockedTransfer(transferId, acs, amount)
+	return c.CompleteTransfer(transferId, acs, amount)
 }
 
 func (c *Client) RecoverTransfer(transferId gocql.UUID) {
@@ -398,8 +404,7 @@ func (c *Client) RecoverTransfer(transferId gocql.UUID) {
 	// Ignore possible error, we will retry
 	acs := make([]Account, 2, 2)
 	var amount *inf.Dec
-	var state string
-	if err := cql.Scan(&acs[0].bic, &acs[0].ban, &acs[1].bic, &acs[1].ban, &amount, &state); err != nil {
+	if err := cql.Scan(&acs[0].bic, &acs[0].ban, &acs[1].bic, &acs[1].ban, &amount); err != nil {
 		if err == gocql.ErrNotFound {
 			llog.Errorf("[%v] Transfer %v not found",
 				c.shortId, transferId)
@@ -422,32 +427,14 @@ func (c *Client) RecoverTransfer(transferId gocql.UUID) {
 		}
 		return
 	}
-	InitAccounts(acs)
-	if state == "new" {
-		// We should avoid locking the transfer if state = "in
-		// progresss" since that may lead to double withdrawal
-		// on the same transfer
-		if err := c.LockAccounts(transferId, acs, false); err != nil {
-			llog.Errorf("[%v] Failed to lock accounts: %v",
-				c.shortId, err)
-			c.ClearTransferClient(transferId)
-			return
-		}
-	} else if state == "in progress" {
-		if err := c.FetchBalance(&acs[0]); err != nil {
-			llog.Errorf("[%v] %v", c.shortId, err)
-			c.ClearTransferClient(transferId)
-			return
-		}
-		if err := c.FetchBalance(&acs[1]); err != nil {
-			llog.Errorf("[%v] %v", c.shortId, err)
-			c.ClearTransferClient(transferId)
-			return
-		}
-	} else {
-		llog.Fatalf("[%v] Unknown transfer %v state %v", c.shortId, transferId, state)
+	InitAccounts(acs, amount)
+	if err := c.LockAccounts(transferId, acs, amount, false); err != nil {
+		llog.Errorf("[%v] Failed to lock accounts: %v",
+			c.shortId, err)
+		c.ClearTransferClient(transferId)
+		return
 	}
-	if err := c.CompleteLockedTransfer(transferId, acs, amount); err != nil {
+	if err := c.CompleteTransfer(transferId, acs, amount); err != nil {
 		llog.Errorf("[%v] Failed to complete transfer %v: %v",
 			c.shortId, transferId, err)
 	}
@@ -455,13 +442,14 @@ func (c *Client) RecoverTransfer(transferId gocql.UUID) {
 
 func payWorker(
 	n_transfers int, zipfian bool, session *gocql.Session,
-	payStats *PayStats, wg *sync.WaitGroup) {
+	oracle *Oracle, payStats *PayStats,
+	wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
 	var client Client
 	var randSource FixedRandomSource
-	client.Init(session, payStats)
+	client.Init(session, oracle, payStats)
 	randSource.Init(session)
 
 	for i := 0; i < n_transfers; i++ {
@@ -475,7 +463,7 @@ func payWorker(
 			acs[0].bic, acs[0].ban = randSource.BicAndBan()
 			acs[1].bic, acs[1].ban = randSource.BicAndBan(acs[0].bic, acs[0].ban)
 		}
-		InitAccounts(acs)
+		InitAccounts(acs, amount)
 
 		cookie := StatsRequestStart()
 		err := client.MakeTransfer(acs, amount)
@@ -512,11 +500,17 @@ func pay(settings *Settings) error {
 
 	var wg sync.WaitGroup
 	var payStats PayStats
+	var oracle *Oracle
+
+	if settings.oracle {
+		oracle = new(Oracle)
+		oracle.Init(session)
+	}
 
 	transfers_per_worker := settings.count / settings.workers
 	remainder := settings.count - transfers_per_worker*settings.workers
 
-	RecoveryStart(session, &payStats)
+	RecoveryStart(session, oracle, &payStats)
 
 	for i := 0; i < settings.workers; i++ {
 		wg.Add(1)
@@ -524,11 +518,14 @@ func pay(settings *Settings) error {
 		if i < remainder {
 			n_transfers++
 		}
-		go payWorker(n_transfers, settings.zipfian, session, &payStats, &wg)
+		go payWorker(n_transfers, settings.zipfian, session, oracle, &payStats, &wg)
 	}
 
 	wg.Wait()
 	RecoveryStop()
+	if oracle != nil {
+		oracle.FindBrokenAccounts(session)
+	}
 
 	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
 		payStats.errors,
