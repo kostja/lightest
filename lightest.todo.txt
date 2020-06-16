@@ -28,6 +28,8 @@ done - populate should generate dups
 done * pop fatal error nil
 * we seem to lose all applier goroutines on errors in pay
 * balance mismatch
+  - stop deleting the transfer to see what happens and track double executions
+  * gocql.mapscan broken for scylla?
 * run recover at workload end
 * only end the workload when we fully recover/proceed with
 * fatalf deleting transfer with nil amount

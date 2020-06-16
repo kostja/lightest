@@ -233,13 +233,7 @@ func (c *Client) LockAccounts(transferId gocql.UUID, acs []Account, wait bool) e
 				// Lock failed because of a conflict or account is missing.
 				pendingTransfer, exists := row["pending_transfer"].(gocql.UUID)
 				if !exists || pendingTransfer == nilUuid {
-					atomic.AddUint64(&c.payStats.no_such_account, 1)
-					msg := fmt.Sprintf("Account %v:%v not found, ending transfer %v",
-						account.bic, account.ban, transferId)
-					llog.Tracef("[%v] %v", c.shortId, msg)
-					if err = c.DeleteTransfer(transferId); err != nil {
-						return err
-					}
+					// No such account. Complete will delete the transfer.
 					return nil
 				}
 				// There is a non-empty pending transfer.
@@ -325,6 +319,7 @@ func (c *Client) CompleteLockedTransfer(
 	llog.Tracef("[%v] Completing transfer %v amount %v", c.shortId, transferId, amount)
 
 	if !acs[0].found || !acs[1].found {
+		atomic.AddUint64(&c.payStats.no_such_account, 1)
 		return c.DeleteTransfer(transferId)
 	}
 
@@ -414,7 +409,7 @@ func (c *Client) RecoverTransfer(transferId gocql.UUID) {
 		return
 	}
 	if amount == nil {
-		llog.Errorf("[%v] Deleting transfer %v with nil amount",
+		llog.Fatalf("[%v] Deleting transfer %v with nil amount",
 			c.shortId, transferId)
 		cql := c.delete_.Bind(transferId, c.clientId)
 		// This can happen because of a timestamp tie:
@@ -447,6 +442,8 @@ func (c *Client) RecoverTransfer(transferId gocql.UUID) {
 			c.ClearTransferClient(transferId)
 			return
 		}
+	} else {
+		llog.Fatalf("[%v] Unknown transfer %v state %v", c.shortId, transferId, state)
 	}
 	if err := c.CompleteLockedTransfer(transferId, acs, amount); err != nil {
 		llog.Errorf("[%v] Failed to complete transfer %v: %v",
