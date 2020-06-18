@@ -99,7 +99,8 @@ func (t *Transfer) InitRandomTransfer(randSource *FixedRandomSource, zipfian boo
 	t.InitAccounts()
 }
 
-func (t *Transfer) InitEmptyTransfer() {
+func (t *Transfer) InitEmptyTransfer(id TransferId) {
+	t.id = id
 	t.acs = make([]Account, 2, 2)
 }
 
@@ -119,6 +120,7 @@ func (c *Client) Init(session *gocql.Session, oracle *Oracle, payStats *PayStats
 	c.payStats = payStats
 	c.insertTransfer = session.Query(INSERT_TRANSFER)
 	c.setTransferClient = session.Query(SET_TRANSFER_CLIENT)
+	c.setTransferState = session.Query(SET_TRANSFER_STATE)
 	c.clearTransferClient = session.Query(CLEAR_TRANSFER_CLIENT)
 	c.deleteTransfer = session.Query(DELETE_TRANSFER)
 	c.fetchTransfer = session.Query(FETCH_TRANSFER)
@@ -177,6 +179,31 @@ func (c *Client) SetTransferClient(transferId TransferId) error {
 	return nil
 }
 
+// Accept interfaces to allow nil client id
+func (c *Client) SetTransferState(t *Transfer, state string) error {
+
+	llog.Tracef("[%v] [%v] Setting state %v", c.shortId, t.id, state)
+
+	cql := c.setTransferState
+	cql.Bind(state, t.id, c.clientId)
+	row := Row{}
+	if applied, err := cql.MapScanCAS(row); err != nil || !applied {
+		if err != nil {
+			return merry.Wrap(err)
+		}
+		rowClientId, exists := row["client_id"]
+		if !exists || rowClientId == nilUuid {
+			llog.Tracef("[%v] [%v] Failed to set state: no such transfer",
+				c.shortId, t.id)
+			return merry.Wrap(gocql.ErrNotFound)
+		}
+		return merry.New(fmt.Sprintf("our id %v, previous id %v",
+			c.clientId, rowClientId))
+	}
+	t.state = state
+	return nil
+}
+
 // In case we failed for whatever reason try to clean up
 // the transfer client, to allow speedy recovery
 func (c *Client) ClearTransferClient(transferId TransferId) {
@@ -222,6 +249,11 @@ func (c *Client) LockAccounts(t *Transfer, wait bool) error {
 	llog.Tracef("[%v] [%v] Locking %v", c.shortId, t.id, t)
 	sleepDuration := time.Millisecond*time.Duration(rand.Intn(10)) + time.Millisecond
 	maxSleepDuration, _ := time.ParseDuration("10s")
+
+	if t.state != "new" {
+		// The transfer is already locked
+		return nil
+	}
 
 	// Upon failure to take lock on the second account, we should try to rollback
 	// lock on the first to avoid deadlocks. We shouldn't, however, accidentally
@@ -340,52 +372,58 @@ func (c *Client) LockAccounts(t *Transfer, wait bool) error {
 			i++
 		}
 	}
-	// Move transfer to 'in progress', to not attempt to transfer
+	// Move transfer to 'locked', to not attempt to transfer
 	// 	the money twice during recovery
-	return nil
+	return c.SetTransferState(t, "locked")
 }
 
 func (c *Client) CompleteTransfer(t *Transfer) error {
 
 	llog.Tracef("[%v] [%v] Completing %v", c.shortId, t.id, t)
 
-	amount := t.amount
 	acs := t.acs
 
-	if c.oracle != nil {
-		c.oracle.BeginTransfer(t.id, acs, amount)
-	}
+	if t.state != "complete" {
 
-	if acs[0].found && acs[1].found && amount.Cmp(acs[0].balance) <= 0 {
+		amount := t.amount
 
-		acs[0].balance.Sub(acs[0].balance, amount)
-		acs[1].balance.Add(acs[1].balance, amount)
-
-		llog.Tracef("[%v] [%v] Moving funds %v", c.shortId, t.id, t)
-
-		// From now on we can ignore 'applied' - the record may
-		// not be applied only if someone completed our transfer or
-		// 30 seconds have elapsed.
-		cql := c.updateAccountBalance
-		for i := 0; i < 2; i++ {
-			cql.Bind(acs[i].balance, acs[i].bic, acs[i].ban, acs[i].amount, t.id)
-			if err := cql.Exec(); err != nil {
-				llog.Tracef("[%v] [%v] Failed to set account %v %v:%v to %v",
-					c.shortId, t.id, i, acs[i].bic, acs[i].ban, acs[i].balance)
-				return merry.Wrap(err)
-			}
+		if c.oracle != nil {
+			c.oracle.BeginTransfer(t.id, acs, amount)
 		}
-	} else if !acs[0].found || !acs[1].found {
-		llog.Tracef("[%v] [%v] Account not found for %v", c.shortId, t.id, t)
 
-		atomic.AddUint64(&c.payStats.no_such_account, 1)
-	} else {
-		llog.Tracef("[%v] [%v] Insufficient funds for %v", c.shortId, t.id, t)
-		atomic.AddUint64(&c.payStats.insufficient_funds, 1)
-	}
+		if acs[0].found && acs[1].found && amount.Cmp(acs[0].balance) <= 0 {
 
-	if c.oracle != nil {
-		c.oracle.CompleteTransfer(t.id, acs, amount)
+			acs[0].balance.Sub(acs[0].balance, amount)
+			acs[1].balance.Add(acs[1].balance, amount)
+
+			llog.Tracef("[%v] [%v] Moving funds %v", c.shortId, t.id, t)
+
+			// From now on we can ignore 'applied' - the record may
+			// not be applied only if someone completed our transfer or
+			// 30 seconds have elapsed.
+			cql := c.updateAccountBalance
+			for i := 0; i < 2; i++ {
+				cql.Bind(acs[i].balance, acs[i].bic, acs[i].ban, acs[i].amount, t.id)
+				if err := cql.Exec(); err != nil {
+					llog.Tracef("[%v] [%v] Failed to set account %v %v:%v to %v",
+						c.shortId, t.id, i, acs[i].bic, acs[i].ban, acs[i].balance)
+					return merry.Wrap(err)
+				}
+			}
+		} else if !acs[0].found || !acs[1].found {
+			llog.Tracef("[%v] [%v] Account not found for %v", c.shortId, t.id, t)
+
+			atomic.AddUint64(&c.payStats.no_such_account, 1)
+		} else {
+			llog.Tracef("[%v] [%v] Insufficient funds for %v", c.shortId, t.id, t)
+			atomic.AddUint64(&c.payStats.insufficient_funds, 1)
+		}
+		if c.oracle != nil {
+			c.oracle.CompleteTransfer(t.id, acs, amount)
+		}
+		if err := c.SetTransferState(t, "complete"); err != nil {
+			return err
+		}
 	}
 
 	for i := 0; i < 2; i++ {
@@ -442,7 +480,7 @@ func (c *Client) RecoverTransfer(transferId TransferId) {
 		return
 	}
 	t := new(Transfer)
-	t.InitEmptyTransfer()
+	t.InitEmptyTransfer(transferId)
 	cql := c.fetchTransfer
 	cql.Bind(transferId)
 	// Ignore possible error, we will retry
