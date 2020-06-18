@@ -29,6 +29,7 @@ CREATE TABLE lightest.transfers (
     dst_bic TEXT, -- destination bank identification code
     dst_ban TEXT, -- destination bank account number
     amount DECIMAL, -- transfer amount
+    state TEXT, -- 'new', 'locked', 'complete'
     client_id UUID, -- the client performing the transfer
     PRIMARY KEY (transfer_id)
 )`
@@ -55,8 +56,8 @@ INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
 // Client id has to be updated separately to let it expire
 const INSERT_TRANSFER = `
 INSERT INTO transfers
-  (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount)
-  VALUES (?, ?, ?, ?, ?, ?)
+  (transfer_id, src_bic, src_ban, dst_bic, dst_ban, amount, state)
+  VALUES (?, ?, ?, ?, ?, ?, 'new')
   IF NOT EXISTS
 `
 
@@ -67,6 +68,13 @@ UPDATE transfers USING TTL 30
   SET client_id = ?
   WHERE transfer_id = ?
   IF amount != NULL AND client_id = NULL
+`
+
+const SET_TRANSFER_STATE = `
+UPDATE transfers
+  SET state = ?
+  WHERE transfer_id = ?
+  IF amount != NULL AND client_id = ?
 `
 
 // Always check the row exists to not accidentally add a transfer
@@ -84,7 +92,7 @@ DELETE FROM transfers
 `
 
 const FETCH_TRANSFER = `
-SELECT src_bic, src_ban, dst_bic, dst_ban, amount
+SELECT src_bic, src_ban, dst_bic, dst_ban, amount, state
   FROM transfers
   WHERE transfer_id = ?
 `
