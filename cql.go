@@ -50,7 +50,7 @@ SELECT value FROM lightest.settings WHERE key = ?
 `
 
 const INSERT_ACCOUNT = `
-INSERT INTO accounts (bic, ban, balance) VALUES (?, ?, ?) IF NOT EXISTS
+INSERT INTO accounts (bic, ban, balance, pending_amount) VALUES (?, ?, ?, 0) IF NOT EXISTS
 `
 
 // Client id has to be updated separately to let it expire
@@ -120,20 +120,20 @@ const LOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = ?, pending_amount = ?
   WHERE bic = ? AND ban = ?
-  IF balance != NULL AND pending_transfer = NULL and pending_amount = NULL
+  IF balance != NULL AND pending_amount != NULL AND pending_transfer = NULL
 `
 
 // Always check the row exists in IF to not accidentally add a transfer
 //
 const UNLOCK_ACCOUNT = `
 UPDATE accounts
-  SET pending_transfer = NULL, pending_amount = NULL
+  SET pending_transfer = NULL, pending_amount = 0
   WHERE bic = ? AND ban = ?
   IF balance != NULL AND pending_transfer = ?
 `
 
 const FETCH_BALANCE = `
-SELECT balance
+SELECT balance, pending_amount
   FROM accounts
   WHERE bic = ? AND ban = ?
 `
@@ -141,9 +141,9 @@ SELECT balance
 // Always check the row exists in IF to not accidentally add a transfer
 const UPDATE_BALANCE = `
 UPDATE accounts
-  SET pending_amount = NULL, balance = ?
+  SET pending_amount = 0, balance = ?
   WHERE bic = ? AND ban = ?
-  IF balance != NULL AND pending_amount = ? AND pending_transfer = ?
+  IF balance != NULL AND pending_transfer = ?
 `
 
 const CHECK_BALANCE = `
