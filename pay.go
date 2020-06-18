@@ -186,8 +186,10 @@ func (c *Client) SetTransferClient(transferId TransferId) error {
 			return merry.Wrap(gocql.ErrNotFound)
 		}
 		if c.clientId != rowClientId {
-			return merry.New(fmt.Sprintf("our id %v, previous id %v",
+			// The transfer is already worked on.
+			err := merry.New(fmt.Sprintf("our id %v, previous id %v",
 				c.clientId, rowClientId))
+			return merry.WithCause(gocql.ErrNotFound, err)
 		} // c.clientId == rowClientId
 	}
 	return nil
