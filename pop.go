@@ -156,5 +156,6 @@ func populate(settings *Settings) error {
 	llog.Infof("Done %v accounts, %v errors, %v duplicates",
 		settings.count, stats.errors, stats.duplicates)
 
+	StatsReportSummary()
 	return nil
 }

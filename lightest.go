@@ -99,7 +99,6 @@ bandwidth along the way.`,
 			if err := populate(&settings); err != nil {
 				llog.Fatalf("%v", err)
 			}
-			StatsReportSummary()
 			llog.Infof("Total balance: %v", check(&settings, nil))
 		},
 	}
@@ -119,7 +118,6 @@ bandwidth along the way.`,
 			if err := pay(&settings); err != nil {
 				llog.Fatalf("%v", err)
 			}
-			StatsReportSummary()
 			llog.Infof("Final balance: %v", check(&settings, sum))
 		},
 	}
