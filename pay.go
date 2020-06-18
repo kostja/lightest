@@ -69,15 +69,15 @@ type Account struct {
 	ban            string
 	balance        *inf.Dec
 	pending_amount *inf.Dec
-	lockOrder      int
 	found          bool
 }
 
 type Transfer struct {
-	id     TransferId
-	acs    []Account
-	amount *inf.Dec
-	state  string
+	id        TransferId
+	acs       []Account
+	lockOrder []*Account
+	amount    *inf.Dec
+	state     string
 }
 
 func (t *Transfer) InitAccounts() {
@@ -85,13 +85,16 @@ func (t *Transfer) InitAccounts() {
 		llog.Fatalf("[%v] Found transfer with nil amount", t.id)
 	}
 	acs := t.acs
+	t.lockOrder = make([]*Account, 2, 2)
 	// Always lock accounts in lexicographical order to avoid livelocks
 	if acs[1].bic > acs[0].bic ||
 		acs[1].bic == acs[0].bic &&
 			acs[1].ban > acs[0].ban {
-		acs[1].lockOrder = 1
+		t.lockOrder[0] = &t.acs[0]
+		t.lockOrder[1] = &t.acs[1]
 	} else {
-		acs[0].lockOrder = 1
+		t.lockOrder[0] = &t.acs[1]
+		t.lockOrder[1] = &t.acs[0]
 	}
 	// Use pending amount as a flag to avoid double transfer on recover
 	acs[0].pending_amount = new(inf.Dec).Neg(t.amount)
@@ -290,7 +293,7 @@ func (c *Client) LockAccounts(t *Transfer, wait bool) error {
 
 	var i = 0
 	for i < 2 {
-		account := &t.acs[t.acs[i].lockOrder]
+		account := t.lockOrder[i]
 		cql := c.lockAccount
 		cql.Bind(t.id, account.pending_amount, account.bic, account.ban)
 		row := Row{}
