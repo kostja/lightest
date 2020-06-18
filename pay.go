@@ -491,6 +491,7 @@ func (c *Client) MakeTransfer(t *Transfer) error {
 }
 
 func (c *Client) RecoverTransfer(transferId TransferId) {
+	cookie := StatsRequestStart()
 	llog.Tracef("[%v] [%v] Recovering transfer", c.shortId, transferId)
 	atomic.AddUint64(&c.payStats.recoveries, 1)
 	if err := c.SetTransferClient(transferId); err != nil {
@@ -527,6 +528,8 @@ func (c *Client) RecoverTransfer(transferId TransferId) {
 	if err := c.CompleteTransfer(t); err != nil {
 		llog.Errorf("[%v] [%v] Failed to complete transfer: %v",
 			c.shortId, t.id, err)
+	} else {
+		StatsRequestEnd(cookie)
 	}
 }
 
@@ -548,14 +551,12 @@ func payWorker(
 		t.InitRandomTransfer(&randSource, zipfian)
 
 		cookie := StatsRequestStart()
-		err := client.MakeTransfer(t)
-		StatsRequestEnd(cookie)
-
-		if err != nil {
+		if err := client.MakeTransfer(t); err != nil {
 			llog.Errorf("[%v] %v", client.shortId, err)
 			atomic.AddUint64(&payStats.errors, 1)
 			return
 		}
+		StatsRequestEnd(cookie)
 	}
 }
 
