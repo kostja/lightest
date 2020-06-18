@@ -116,6 +116,7 @@ UPDATE accounts
 `
 
 // Always check the row exists in IF to not accidentally add a transfer
+//
 const UNLOCK_ACCOUNT = `
 UPDATE accounts
   SET pending_transfer = NULL, pending_amount = NULL

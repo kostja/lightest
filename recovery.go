@@ -25,7 +25,7 @@ loop:
 }
 
 type RecoveryQueue struct {
-	queue    chan gocql.UUID
+	queue    chan TransferId
 	wg       sync.WaitGroup
 	session  *gocql.Session
 	oracle   *Oracle
@@ -38,7 +38,7 @@ func (q *RecoveryQueue) Init(session *gocql.Session, oracle *Oracle, payStats *P
 	q.oracle = oracle
 	q.payStats = payStats
 	// Recovery is recursive, create the channels first
-	q.queue = make(chan gocql.UUID, 4096000)
+	q.queue = make(chan TransferId, 4096000)
 }
 
 func (q *RecoveryQueue) StartRecoveryWorker() {
@@ -53,7 +53,7 @@ func (q *RecoveryQueue) Stop() {
 
 var q RecoveryQueue
 
-func RecoverTransfer(transferId gocql.UUID) {
+func RecoverTransfer(transferId TransferId) {
 	q.queue <- transferId
 }
 
@@ -75,9 +75,9 @@ func Recover() {
 		}
 		// Ignore possible errors
 		llog.Infof("Found %v outstanding transfers, recovering...", iter.NumRows())
-		var transfer_id gocql.UUID
-		for iter.Scan(&transfer_id) {
-			c.RecoverTransfer(transfer_id)
+		var transferId TransferId
+		for iter.Scan(&transferId) {
+			c.RecoverTransfer(transferId)
 		}
 	}
 }

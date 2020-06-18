@@ -11,33 +11,53 @@ type TrackingAccount struct {
 	bic        string
 	ban        string
 	balance    *inf.Dec
-	transferId gocql.UUID
+	transferId TransferId
 }
 
-func (acc *TrackingAccount) BeginDebit(amount *inf.Dec) {
+func (acc *TrackingAccount) setTransfer(transferId TransferId) {
+	if acc.transferId != nilUuid && acc.transferId != transferId {
+		llog.Fatalf("setTransfer() on %v:%v: current transfer id %v, setting %v",
+			acc.bic, acc.ban, acc.transferId, transferId)
+	}
+	acc.transferId = transferId
+}
+
+func (acc *TrackingAccount) clearTransfer(transferId TransferId) {
+	if acc.transferId != nilUuid && acc.transferId != transferId {
+		llog.Fatalf("clearTransfer() on %v:%v: current transfer id %v, clearing %v",
+			acc.bic, acc.ban, acc.transferId, transferId)
+	}
+	acc.transferId = nilUuid
+}
+
+func (acc *TrackingAccount) BeginDebit(transferId TransferId, amount *inf.Dec) {
+	acc.setTransfer(transferId)
+}
+
+func (acc *TrackingAccount) CompleteDebit(transferId TransferId, amount *inf.Dec) {
+	acc.clearTransfer(transferId)
 	acc.balance.Sub(acc.balance, amount)
 }
 
-func (acc *TrackingAccount) CompleteDebit() {
+func (acc *TrackingAccount) BeginCredit(transferId TransferId, amount *inf.Dec) {
+	acc.setTransfer(transferId)
 }
 
-func (acc *TrackingAccount) BeginCredit(amount *inf.Dec) {
+func (acc *TrackingAccount) CompleteCredit(transferId TransferId, amount *inf.Dec) {
+	acc.clearTransfer(transferId)
 	acc.balance.Add(acc.balance, amount)
-}
-
-func (acc *TrackingAccount) CompleteCredit() {
 }
 
 type Oracle struct {
 	acs       map[string]*TrackingAccount
-	transfers map[gocql.UUID]bool
+	transfers map[TransferId]bool
 	mux       sync.Mutex
 }
 
 func (o *Oracle) Init(session *gocql.Session) {
 
 	o.acs = make(map[string]*TrackingAccount)
-	o.transfers = make(map[gocql.UUID]bool)
+	o.transfers = make(map[TransferId]bool)
 	iter := session.Query("SELECT bic, ban, balance FROM accounts").Iter()
 	var bic, ban string
 	var balance *inf.Dec
@@ -63,7 +83,21 @@ func (o *Oracle) lookupAccounts(acs []Account) (*TrackingAccount, *TrackingAccou
 	return from, to
 }
 
-func (o *Oracle) MakeTransfer(transferId gocql.UUID, acs []Account, amount *inf.Dec) {
+func (o *Oracle) BeginTransfer(transferId TransferId, acs []Account, amount *inf.Dec) {
+	o.mux.Lock()
+	defer o.mux.Unlock()
+	if _, exists := o.transfers[transferId]; exists {
+		llog.Tracef("Double execution of the same transfer %v", transferId)
+		// Have processed this transfer already
+		return
+	}
+	if from, to := o.lookupAccounts(acs); from != nil && to != nil && amount.Cmp(from.balance) <= 0 {
+		from.BeginDebit(transferId, amount)
+		to.BeginCredit(transferId, amount)
+	}
+}
+
+func (o *Oracle) CompleteTransfer(transferId TransferId, acs []Account, amount *inf.Dec) {
 	o.mux.Lock()
 	defer o.mux.Unlock()
 	if _, exists := o.transfers[transferId]; exists {
@@ -72,10 +106,8 @@ func (o *Oracle) MakeTransfer(transferId gocql.UUID, acs []Account, amount *inf.
 	}
 	o.transfers[transferId] = true
 	if from, to := o.lookupAccounts(acs); from != nil && to != nil && amount.Cmp(from.balance) <= 0 {
-		from.BeginDebit(amount)
-		to.BeginCredit(amount)
-		from.CompleteDebit()
-		to.CompleteCredit()
+		from.CompleteDebit(transferId, amount)
+		to.CompleteCredit(transferId, amount)
 	}
 }
 
