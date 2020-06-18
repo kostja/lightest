@@ -13,6 +13,17 @@ import (
 	"time"
 )
 
+func IsTransientError(err error) bool {
+	reqErr, isRequestErr := err.(gocql.RequestError)
+	if isRequestErr && reqErr != nil {
+		return true
+	} else if err == gocql.ErrTimeoutNoResponse {
+		return true
+	} else {
+		return false
+	}
+}
+
 var nClients uint64
 var nTransfers uint64
 
@@ -307,11 +318,8 @@ func (c *Client) LockAccounts(t *Transfer, wait bool) error {
 			// No money changed its hands and the transfer can be recovered
 			// later
 			if err != nil {
-				reqErr, isRequestErr := err.(gocql.RequestError)
-				if isRequestErr && reqErr != nil {
-					llog.Errorf("[%v] [%v] Retrying after request error: %v", c.shortId, t.id, reqErr)
-				} else if err == gocql.ErrTimeoutNoResponse {
-					llog.Errorf("[%v] [%v] Retrying after timeout: %v", c.shortId, t.id, err)
+				if IsTransientError(err) {
+					llog.Tracef("[%v] [%v] Retrying after error: %v", c.shortId, t.id, err)
 				} else {
 					return merry.Wrap(err)
 				}
@@ -545,18 +553,24 @@ func payWorker(
 	client.Init(session, oracle, payStats)
 	randSource.Init(session)
 
-	for i := 0; i < n_transfers; i++ {
+	for i := 0; i < n_transfers; {
 
 		t := new(Transfer)
 		t.InitRandomTransfer(&randSource, zipfian)
 
 		cookie := StatsRequestStart()
 		if err := client.MakeTransfer(t); err != nil {
-			llog.Errorf("[%v] %v", client.shortId, err)
-			atomic.AddUint64(&payStats.errors, 1)
-			return
+			if merry.Is(err, gocql.ErrNotFound) {
+				llog.Tracef("[%v] [%v] Transfer not found", client.shortId, t.id, err)
+			} else if IsTransientError(err) {
+				llog.Tracef("[%v] [%v] Transfer failed: %v", client.shortId, t.id, err)
+			} else {
+				return
+			}
+		} else {
+			i++
+			StatsRequestEnd(cookie)
 		}
-		StatsRequestEnd(cookie)
 	}
 }
 
