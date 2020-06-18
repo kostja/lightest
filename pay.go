@@ -378,7 +378,8 @@ func (c *Client) LockAccounts(t *Transfer, wait bool) error {
 				if err = c.FetchAccountBalance(account); err != nil {
 					return merry.Wrap(err)
 				}
-			} else {
+			} else if !applied {
+				// Fetch previous pending amount
 				account.pending_amount = row["pending_amount"].(*inf.Dec)
 			}
 			i++
@@ -404,12 +405,14 @@ func (c *Client) CompleteTransfer(t *Transfer) error {
 
 		if acs[0].found && acs[1].found {
 			// Calcualte the destination state
-			acs[0].balance.Add(acs[0].balance, acs[0].pending_amount)
-			acs[1].balance.Add(acs[1].balance, acs[0].pending_amount)
+			llog.Tracef("[%v] [%v] Calculating balances for %v", c.shortId, t.id, t)
+			for i := 0; i < 2; i++ {
+				acs[i].balance.Add(acs[i].balance, acs[i].pending_amount)
+			}
 
 			if acs[0].balance.Sign() >= 0 {
 
-				llog.Tracef("[%v] [%v] Moving funds %v", c.shortId, t.id, t)
+				llog.Tracef("[%v] [%v] Moving funds for %v", c.shortId, t.id, t)
 
 				// From now on we can ignore 'applied' - the record may
 				// not be applied only if someone completed our transfer or
