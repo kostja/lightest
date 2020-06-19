@@ -53,6 +53,10 @@ const INSERT_ACCOUNT = `
 INSERT INTO accounts (bic, ban, balance, pending_amount) VALUES (?, ?, ?, 0) IF NOT EXISTS
 `
 
+const UPSERT_ACCOUNT = `
+INSERT INTO accounts (bic, ban, balance, pending_amount) VALUES (?, ?, ?, 0)
+`
+
 // Client id has to be updated separately to let it expire
 const INSERT_TRANSFER = `
 INSERT INTO transfers

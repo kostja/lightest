@@ -1,23 +1,26 @@
 package main
 
 import (
+	"github.com/ansel1/merry"
 	llog "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
 type Settings struct {
-	log_level string
-	workers   int
-	count     int
-	host      string
-	user      string
-	password  string
-	seed      int64
-	zipfian   bool
-	oracle    bool
+	log_level   string
+	workers     int
+	count       int
+	host        string
+	user        string
+	password    string
+	consistency string
+	seed        int64
+	zipfian     bool
+	oracle      bool
 }
 
 func Defaults() Settings {
@@ -28,6 +31,7 @@ func Defaults() Settings {
 	s.host = "localhost"
 	s.user = "cassandra"
 	s.password = "cassandra"
+	s.consistency = "serial"
 	s.seed = time.Now().UnixNano()
 	s.zipfian = false
 	s.oracle = false
@@ -64,6 +68,11 @@ bandwidth along the way.`,
 			if settings.workers > settings.count && settings.count > 0 {
 				settings.workers = settings.count
 			}
+			if !strings.EqualFold(settings.consistency, "serial") &&
+				!strings.EqualFold(settings.consistency, "quorum") {
+				return merry.New("--consitency must be serial or quorum")
+			}
+			settings.consistency = strings.ToLower(settings.consistency)
 			StatsSetTotal(settings.count)
 			return nil
 		},
@@ -106,6 +115,10 @@ bandwidth along the way.`,
 		"count", "n",
 		settings.count,
 		"Number of accounts to create")
+	popCmd.PersistentFlags().StringVarP(&settings.consistency,
+		"consistency", "c",
+		settings.consistency,
+		"Consistency level (serial or quorum)")
 
 	var payCmd = &cobra.Command{
 		Use:     "pay",

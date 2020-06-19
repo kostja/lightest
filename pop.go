@@ -96,9 +96,13 @@ func populate(settings *Settings) error {
 
 		var rand FixedRandomSource
 		rand.Init(session)
+		quorum := settings.consistency == "quorum"
 
-		stmt := session.Query(INSERT_ACCOUNT)
-		stmt.Consistency(gocql.One)
+		cql := INSERT_ACCOUNT
+		if quorum {
+			cql = UPSERT_ACCOUNT
+		}
+		stmt := session.Query(cql)
 		llog.Tracef("Worker %d inserting %d accounts", id, n_accounts)
 		for i := 0; i < n_accounts; {
 			cookie := StatsRequestStart()
@@ -106,9 +110,16 @@ func populate(settings *Settings) error {
 			balance := rand.NewStartBalance()
 			llog.Tracef("Inserting account %v:%v - %v", bic, ban, balance)
 			stmt.Bind(bic, ban, balance)
-			row := Row{}
 			for {
-				if applied, err := stmt.MapScanCAS(row); err != nil {
+				applied := true
+				var err error
+				if quorum {
+					err = stmt.Exec()
+				} else {
+					row := Row{}
+					applied, err = stmt.MapScanCAS(row)
+				}
+				if err != nil {
 					atomic.AddUint64(&stats.errors, 1)
 					reqErr, isRequestErr := err.(gocql.RequestError)
 					if isRequestErr && reqErr != nil {

@@ -35,6 +35,8 @@ done * only end the workload when we fully recover/proceed with
 done * fatalf deleting transfer with nil amount
 done all transfers
 done * check account not found are really not found
+done * implement quorum populate
+* count statistics on total attempts in addition to total successful attempts
 
 Other:
 - use more lightweight logging, zerolog or zap
