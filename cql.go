@@ -1,7 +1,7 @@
 package main
 
 const CREATE_KS = `CREATE KEYSPACE IF NOT EXISTS lightest
-WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor' : 1 }
+WITH REPLICATION = { 'class': 'NetworkTopologyStrategy', 'replication_factor' : 3 }
 AND DURABLE_WRITES=true`
 
 const CREATE_SETTINGS_TAB = `

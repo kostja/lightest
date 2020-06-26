@@ -36,7 +36,7 @@ done * fatalf deleting transfer with nil amount
 done all transfers
 done * check account not found are really not found
 done * implement quorum populate
-* count statistics on total attempts in addition to total successful attempts
+* always update the client id ttl
 
 Other:
 - use more lightweight logging, zerolog or zap
