@@ -14,6 +14,7 @@ import (
 )
 
 func IsTransientError(err error) bool {
+	err = merry.Unwrap(err)
 	reqErr, isRequestErr := err.(gocql.RequestError)
 	if isRequestErr && reqErr != nil {
 		return true
@@ -567,9 +568,12 @@ func payWorker(
 		if err := client.MakeTransfer(t); err != nil {
 			if merry.Is(err, gocql.ErrNotFound) {
 				llog.Tracef("[%v] [%v] Transfer not found", client.shortId, t.id, err)
+				i++
+				StatsRequestEnd(cookie)
 			} else if IsTransientError(err) {
 				llog.Tracef("[%v] [%v] Transfer failed: %v", client.shortId, t.id, err)
 			} else {
+				llog.Errorf("Got a fatal error %v, ending worker", err)
 				return
 			}
 		} else {
@@ -630,11 +634,12 @@ func pay(settings *Settings) error {
 		oracle.FindBrokenAccounts(session)
 	}
 
-	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v\n",
+	llog.Infof("Errors: %v, Retries: %v, Recoveries: %v, Not found: %v, Overdraft: %v\n",
 		payStats.errors,
 		payStats.retries,
 		payStats.recoveries,
-		payStats.no_such_account)
+		payStats.no_such_account,
+		payStats.insufficient_funds)
 
 	return nil
 }

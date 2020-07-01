@@ -62,6 +62,8 @@ func Recover() {
 	var c = Client{}
 	c.Init(q.session, q.oracle, q.payStats)
 
+	llog.Infof("Fetching dead transfers")
+
 	for {
 		iter := q.session.Query(FETCH_DEAD_TRANSFERS).Iter()
 		closeIter := func() {
