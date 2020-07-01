@@ -76,7 +76,7 @@ func populate(settings *Settings) error {
 		Password: settings.password,
 	}
 	cluster.Timeout, _ = time.ParseDuration("30s")
-	cluster.Consistency = gocql.One
+	cluster.Consistency = gocql.Quorum
 
 	if err := bootstrapDatabase(cluster, settings); err != nil {
 		return merry.Wrap(err)

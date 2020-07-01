@@ -16,7 +16,7 @@ func check(settings *Settings, prev *inf.Dec) *inf.Dec {
 	}
 	cluster.Timeout, _ = time.ParseDuration("3000s")
 	cluster.Keyspace = "lightest"
-	cluster.Consistency = gocql.One
+	cluster.Consistency = gocql.Quorum
 
 	session, err := cluster.CreateSession()
 	defer session.Close()

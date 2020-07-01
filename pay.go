@@ -591,7 +591,7 @@ func pay(settings *Settings) error {
 	}
 	cluster.Timeout, _ = time.ParseDuration("30s")
 	cluster.Keyspace = "lightest"
-	cluster.Consistency = gocql.One
+	cluster.Consistency = gocql.Quorum
 
 	llog.Infof("Establishing connection to the cluster")
 	session, err := cluster.CreateSession()
