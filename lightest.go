@@ -21,6 +21,7 @@ type Settings struct {
 	seed        int64
 	zipfian     bool
 	oracle      bool
+	check       bool
 }
 
 func Defaults() Settings {
@@ -32,6 +33,7 @@ func Defaults() Settings {
 	s.user = "cassandra"
 	s.password = "cassandra"
 	s.consistency = "serial"
+	s.check = false
 	s.seed = time.Now().UnixNano()
 	s.zipfian = false
 	s.oracle = false
@@ -131,7 +133,9 @@ bandwidth along the way.`,
 			if err := pay(&settings); err != nil {
 				llog.Fatalf("%v", err)
 			}
-			llog.Infof("Final balance: %v", check(&settings, sum))
+			if settings.check {
+				llog.Infof("Final balance: %v", check(&settings, sum))
+			}
 		},
 	}
 	payCmd.PersistentFlags().IntVarP(&settings.count,
@@ -143,6 +147,9 @@ bandwidth along the way.`,
 	payCmd.PersistentFlags().BoolVarP(&settings.oracle,
 		"oracle", "o", settings.oracle,
 		"Check all payments against the built-in oracle.")
+	payCmd.PersistentFlags().BoolVarP(&settings.check,
+		"check", "", settings.check,
+		"Check the final balance to match the original one (set to false if benchmarking).")
 	rootCmd.AddCommand(popCmd, payCmd)
 	StatsInit()
 	rootCmd.Execute()
