@@ -56,6 +56,7 @@ type Oracle struct {
 
 func (o *Oracle) Init(session *gocql.Session) {
 
+	llog.Infof("Oracle enabled, loading account balances")
 	o.acs = make(map[string]*TrackingAccount)
 	o.transfers = make(map[TransferId]bool)
 	iter := session.Query("SELECT bic, ban, balance FROM accounts").Iter()
