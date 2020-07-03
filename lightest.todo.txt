@@ -36,7 +36,12 @@ done * fatalf deleting transfer with nil amount
 done all transfers
 done * check account not found are really not found
 done * implement quorum populate
-* always update the client id ttl
-
+* automatically detect cluster configuration and set replication
+factor accordingly
+* use serial selects to fetch individual accounts during check
+* increase connection timeouts on all queries which use
+paging
+* add nemesis option
+* always update the client id ttl to avoid race conditions
 Other:
 - use more lightweight logging, zerolog or zap

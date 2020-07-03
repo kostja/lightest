@@ -628,8 +628,8 @@ func pay(settings *Settings) error {
 	}
 
 	wg.Wait()
-	RecoveryStop()
 	StatsReportSummary()
+	RecoveryStop()
 	if oracle != nil {
 		oracle.FindBrokenAccounts(session)
 	}
