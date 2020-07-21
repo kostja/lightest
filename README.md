@@ -8,7 +8,7 @@ that the total sum of all balances stays intact. This is used to fusion
 correctness and performance/stress test into a single benchmark.
 
 The tool can be used to populate accounts and calculate the inital balance,
-or to make transfers (Zipfin and Normal distribution) and check that the
+or to make transfers (Zipfian and Normal distribution) and check that the
 total amount is unchanged.
 
 It also features an oracle mode, in which it checks all debits and credits,
