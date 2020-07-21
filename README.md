@@ -3,7 +3,7 @@
 Banking benchmark - emulate a bank account ledger using lightweight
 transactions.
 
-A nice property of the ledger which encapsulates all possible accounts is
+A nice property of a ledger which encapsulates all possible accounts is
 that the total sum of all balances stays intact. This is used to fusion
 correctness and performance/stress test into a single benchmark.
 
